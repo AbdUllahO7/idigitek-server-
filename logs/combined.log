@@ -6,3 +6,15 @@
 {"level":"info","message":"Server running in development mode on port 5000","service":"secure-express-api","timestamp":"2025-06-01 21:02:44"}
 {"level":"info","message":"API available at http://localhost:5000/api/v1","service":"secure-express-api","timestamp":"2025-06-01 21:02:44"}
 {"level":"info","message":"SIGINT received. Shutting down gracefully...","service":"secure-express-api","timestamp":"2025-06-01 21:02:58"}
+{"level":"info","message":"MongoDB connection established successfully","service":"secure-express-api","timestamp":"2025-06-01 21:08:37"}
+{"level":"info","message":"Database connected successfully","service":"secure-express-api","timestamp":"2025-06-01 21:08:37"}
+{"level":"info","message":"Server running in development mode on port 5000","service":"secure-express-api","timestamp":"2025-06-01 21:08:37"}
+{"level":"info","message":"API available at http://localhost:5000/api/v1","service":"secure-express-api","timestamp":"2025-06-01 21:08:37"}
+{"ip":"::1","level":"info","message":"GET /api/v1","method":"GET","service":"secure-express-api","timestamp":"2025-06-01 21:08:42","url":"/api/v1","userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"}
+{"contentLength":"192","level":"warn","message":"GET /api/v1 404","method":"GET","processingTime":"26ms","service":"secure-express-api","statusCode":404,"timestamp":"2025-06-01 21:08:42","url":"/api/v1"}
+{"ip":"::1","level":"info","message":"GET /favicon.ico","method":"GET","service":"secure-express-api","timestamp":"2025-06-01 21:08:42","url":"/favicon.ico","userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"}
+{"contentLength":"197","level":"warn","message":"GET /favicon.ico 404","method":"GET","processingTime":"4ms","service":"secure-express-api","statusCode":404,"timestamp":"2025-06-01 21:08:42","url":"/favicon.ico"}
+{"level":"info","message":"MongoDB connection established successfully","service":"secure-express-api","timestamp":"2025-06-01 21:09:03"}
+{"level":"info","message":"Database connected successfully","service":"secure-express-api","timestamp":"2025-06-01 21:09:03"}
+{"level":"info","message":"Server running in development mode on port 5000","service":"secure-express-api","timestamp":"2025-06-01 21:09:03"}
+{"level":"info","message":"API available at http://localhost:5000/api/v1","service":"secure-express-api","timestamp":"2025-06-01 21:09:03"}
