@@ -37,32 +37,35 @@ export const env = {
   // CORS settings
   corsAllowedOrigins: process.env.CORS_ALLOWED_ORIGINS ? process.env.CORS_ALLOWED_ORIGINS.split(',') : [],
   
-  // Logging settings
-  logging: {
-    level: process.env.LOG_LEVEL || 'info',
-    filePath: process.env.LOG_FILE_PATH || (isVercel ? '/tmp/logs' : path.join(__dirname, '../../logs')),
-  },
+  // // Logging settings
+  // logging: {
+  //   level: process.env.LOG_LEVEL || 'info',
+  //   filePath: process.env.LOG_FILE_PATH || (isVercel ? '/tmp/logs' : path.join(__dirname, '../../logs')),
+  // },
 
   // Cloudinary settings
   cloudinaryUrl: process.env.CLOUDINARY_URL,
 };
-if (env.logging.filePath && !fs.existsSync(env.logging.filePath)) {
-  try {
-    fs.mkdirSync(env.logging.filePath, { recursive: true });
-    console.log(`✅ Created log folder at ${env.logging.filePath}`);
-  } catch (error) {
-    console.warn(`❌ Failed to create log directory at ${env.logging.filePath}:`, error.message);
-  }
-}
 
 
-if (env.logging.filePath && !fs.existsSync(env.logging.filePath)) {
-  try {
-    fs.mkdirSync(env.logging.filePath, { recursive: true });
-  } catch (error) {
-    console.warn(`Failed to create log directory at ${env.logging.filePath}:`, error.message);
-  }
-}
+
+// if (env.logging.filePath && !fs.existsSync(env.logging.filePath)) {
+//   try {
+//     fs.mkdirSync(env.logging.filePath, { recursive: true });
+//     console.log(`✅ Created log folder at ${env.logging.filePath}`);
+//   } catch (error) {
+//     console.warn(`❌ Failed to create log directory at ${env.logging.filePath}:`, error.message);
+//   }
+// }
+
+
+// if (env.logging.filePath && !fs.existsSync(env.logging.filePath)) {
+//   try {
+//     fs.mkdirSync(env.logging.filePath, { recursive: true });
+//   } catch (error) {
+//     console.warn(`Failed to create log directory at ${env.logging.filePath}:`, error.message);
+//   }
+// }
 // // Validate essential environment variables
 // if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'your-secret-key-change-this-in-production') {
 //   if (env.nodeEnv === 'production') {
