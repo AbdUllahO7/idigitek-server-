@@ -4,6 +4,7 @@ import fs from 'fs';
 
 // Load environment variables from .env file
 dotenv.config({ path: path.join(__dirname, '../../.env') });
+const isVercel = !!process.env.VERCEL;
 
 export const env = {
   // Server settings
@@ -39,21 +40,18 @@ export const env = {
   // Logging settings
   logging: {
     level: process.env.LOG_LEVEL || 'info',
-    filePath: process.env.LOG_FILE_PATH || (process.env.NODE_ENV === 'production' ? '/tmp/logs' : './logs'),
+    filePath: process.env.LOG_FILE_PATH || (isVercel ? '/tmp/logs' : path.join(__dirname, '../../logs')),
   },
 
   // Cloudinary settings
   cloudinaryUrl: process.env.CLOUDINARY_URL,
 };
-if (
-  env.logging.filePath &&
-  env.logging.filePath.startsWith('/tmp') && // Only try to create if it's /tmp or writable
-  !fs.existsSync(env.logging.filePath)
-) {
+if (env.logging.filePath && !fs.existsSync(env.logging.filePath)) {
   try {
     fs.mkdirSync(env.logging.filePath, { recursive: true });
+    console.log(`✅ Created log folder at ${env.logging.filePath}`);
   } catch (error) {
-    console.warn(`Failed to create log directory at ${env.logging.filePath}:`, error.message);
+    console.warn(`❌ Failed to create log directory at ${env.logging.filePath}:`, error.message);
   }
 }
 
