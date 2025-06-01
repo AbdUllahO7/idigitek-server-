@@ -1,0 +1,8 @@
+{"level":"info","message":"MongoDB connection established successfully","service":"secure-express-api","timestamp":"2025-06-01 21:02:10"}
+{"level":"info","message":"Server running in development mode on port 5000","service":"secure-express-api","timestamp":"2025-06-01 21:02:10"}
+{"level":"info","message":"API available at http://localhost:5000/api/v1","service":"secure-express-api","timestamp":"2025-06-01 21:02:10"}
+{"level":"info","message":"MongoDB connection established successfully","service":"secure-express-api","timestamp":"2025-06-01 21:02:44"}
+{"level":"info","message":"Database connected successfully","service":"secure-express-api","timestamp":"2025-06-01 21:02:44"}
+{"level":"info","message":"Server running in development mode on port 5000","service":"secure-express-api","timestamp":"2025-06-01 21:02:44"}
+{"level":"info","message":"API available at http://localhost:5000/api/v1","service":"secure-express-api","timestamp":"2025-06-01 21:02:44"}
+{"level":"info","message":"SIGINT received. Shutting down gracefully...","service":"secure-express-api","timestamp":"2025-06-01 21:02:58"}

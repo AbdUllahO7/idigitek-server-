@@ -38,10 +38,9 @@ export const env = {
   corsAllowedOrigins: process.env.CORS_ALLOWED_ORIGINS ? process.env.CORS_ALLOWED_ORIGINS.split(',') : [],
   
   // // Logging settings
-  // logging: {
-  //   level: process.env.LOG_LEVEL || 'info',
-  //   filePath: process.env.LOG_FILE_PATH || (isVercel ? '/tmp/logs' : path.join(__dirname, '../../logs')),
-  // },
+    logging: {
+        level: process.env.LOG_LEVEL || 'info',
+      },
 
   // Cloudinary settings
   cloudinaryUrl: process.env.CLOUDINARY_URL,
