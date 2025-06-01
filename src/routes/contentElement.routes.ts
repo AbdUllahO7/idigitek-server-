@@ -6,8 +6,8 @@ import multer from 'multer';
 
 const router = express.Router();
 
-// Configure multer for file uploads
-const upload = multer({ dest: 'uploads/' });
+// // Configure multer for file uploads
+// const upload = multer({ dest: 'uploads/' });
 
 // ContentElement routes
 
@@ -19,7 +19,7 @@ router.put('/order', authenticate, ContentElementController.updateElementsOrder)
 router.get('/subsection/:subsectionId', ContentElementController.getContentElementsBySubsection);
 
 // Image upload route
-router.post('/:id/image', authenticate, upload.single('image'), ContentElementController.uploadElementImage);
+// router.post('/:id/image', authenticate, upload.single('image'), ContentElementController.uploadElementImage);
 
 // Routes with the :id parameter should come last
 router.get('/:id', ContentElementController.getContentElementById);
