@@ -464,58 +464,115 @@ class SubSectionService {
         }
     }
     
-    /**
-     * Delete subsection by ID
-     * @param id The subsection ID
-     * @param hardDelete Whether to permanently delete
-     * @returns Promise with the result of the deletion
-     */
-    async deleteSubSectionById(id: string, hardDelete = false): Promise<{ success: boolean; message: string }> {
-        try {
-            if (!mongoose.Types.ObjectId.isValid(id)) {
-                throw AppError.validation('Invalid subsection ID format');
-            }
-
-            const subsection = await SubSectionModel.findById(id);
-            
-            if (!subsection) {
-                throw AppError.notFound(`Subsection with ID ${id} not found`);
-            }
-
-            if (hardDelete) {
-                // Check if there are content elements associated with this subsection
-                const contentElementsCount = await ContentElementModel.countDocuments({ parent: id });
-                if (contentElementsCount > 0) {
-                    throw AppError.badRequest(`Cannot hard delete subsection with ${contentElementsCount} associated content elements`);
+   /**
+ * Delete subsection by ID with cascade delete support
+ * @param id The subsection ID
+ * @param hardDelete Whether to permanently delete
+ * @param cascadeDelete Whether to delete associated content elements (default: true)
+ * @returns Promise with the result of the deletion
+ */
+        async deleteSubSectionById(
+            id: string, 
+            hardDelete = false, 
+            cascadeDelete = true
+        ): Promise<{ success: boolean; message: string; deletedElements?: number }> {
+            try {
+                if (!mongoose.Types.ObjectId.isValid(id)) {
+                    throw AppError.validation('Invalid subsection ID format');
                 }
 
-                // Permanently delete
-                await SubSectionModel.findByIdAndDelete(id);
+                const subsection = await SubSectionModel.findById(id);
                 
-                // Remove this subsection from section item
-                await SectionItemModel.findByIdAndUpdate(
-                    subsection.sectionItem,
-                    { $pull: { subsections: id } }
-                );
-                
-                return { success: true, message: 'Subsection deleted successfully' };
-            } else {
-                // Soft delete
-                await SubSectionModel.findByIdAndUpdate(id, { isActive: false });
-                
-                // Also mark all content elements as inactive
-                await ContentElementModel.updateMany(
-                    { parent: id },
-                    { isActive: false }
-                );
-                
-                return { success: true, message: 'Subsection deactivated successfully' };
+                if (!subsection) {
+                    throw AppError.notFound(`Subsection with ID ${id} not found`);
+                }
+
+                let deletedElementsCount = 0;
+
+                if (hardDelete) {
+                    if (cascadeDelete) {
+                        // First, delete all content elements and their translations
+                        const contentElements = await ContentElementModel.find({ parent: id });
+                        
+                        if (contentElements.length > 0) {
+                            const elementIds = contentElements.map(el => el._id);
+                            
+                            // Delete all translations for these elements
+                            await ContentTranslationModel.deleteMany({
+                                contentElement: { $in: elementIds }
+                            });
+                            
+                            // Delete all content elements
+                            const deleteResult = await ContentElementModel.deleteMany({ parent: id });
+                            deletedElementsCount = deleteResult.deletedCount || 0;
+                        }
+                        
+                        // Now delete the subsection
+                        await SubSectionModel.findByIdAndDelete(id);
+                        
+                        // Remove this subsection from section item
+                        await SectionItemModel.findByIdAndUpdate(
+                            subsection.sectionItem,
+                            { $pull: { subsections: id } }
+                        );
+                        
+                        return { 
+                            success: true, 
+                            message: 'Subsection and all associated content deleted successfully',
+                            deletedElements: deletedElementsCount
+                        };
+                    } else {
+                        // Original logic - check if there are content elements
+                        const contentElementsCount = await ContentElementModel.countDocuments({ parent: id });
+                        if (contentElementsCount > 0) {
+                            throw AppError.badRequest(
+                                `Cannot hard delete subsection with ${contentElementsCount} associated content elements. ` +
+                                `Use cascadeDelete=true to delete all associated content.`
+                            );
+                        }
+
+                        // Permanently delete
+                        await SubSectionModel.findByIdAndDelete(id);
+                        
+                        // Remove this subsection from section item
+                        await SectionItemModel.findByIdAndUpdate(
+                            subsection.sectionItem,
+                            { $pull: { subsections: id } }
+                        );
+                        
+                        return { success: true, message: 'Subsection deleted successfully' };
+                    }
+                } else {
+                    // Soft delete
+                    await SubSectionModel.findByIdAndUpdate(id, { isActive: false });
+                    
+                    // Also mark all content elements as inactive
+                    const updateResult = await ContentElementModel.updateMany(
+                        { parent: id },
+                        { isActive: false }
+                    );
+                    
+                    // Mark all translations as inactive
+                    const contentElements = await ContentElementModel.find({ parent: id });
+                    if (contentElements.length > 0) {
+                        const elementIds = contentElements.map(el => el._id);
+                        await ContentTranslationModel.updateMany(
+                            { contentElement: { $in: elementIds } },
+                            { isActive: false }
+                        );
+                    }
+                    
+                    return { 
+                        success: true, 
+                        message: 'Subsection and all associated content deactivated successfully',
+                        deletedElements: updateResult.modifiedCount || 0
+                    };
+                }
+            } catch (error) {
+                if (error instanceof AppError) throw error;
+                throw AppError.database('Failed to delete subsection', error);
             }
-        } catch (error) {
-            if (error instanceof AppError) throw error;
-            throw AppError.database('Failed to delete subsection', error);
         }
-    }
 
     /**
      * Bulk update subsection order
