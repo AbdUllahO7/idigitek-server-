@@ -1,11 +1,12 @@
 // routes/section.routes.ts
 import express from 'express';
 import { SectionController } from '../controllers/section.controller';
+import multer from 'multer';
 
 const router = express.Router();
 const sectionController = new SectionController();
-// // Configure multer for file uploads
-// const upload = multer({ dest: 'uploads/' });
+// Configure multer for file uploads
+const upload = multer({ dest: 'uploads/' });
 
 
 
@@ -44,11 +45,11 @@ router.patch(
 );
 
 // Upload section image
-// router.post(
-//   '/:id/image',
-//   upload.single('image'),
-//   sectionController.uploadSectionImage
-// );
+router.post(
+  '/:id/image',
+  upload.single('image'),
+  sectionController.uploadSectionImage
+);
 
 // Delete section
 router.delete(
