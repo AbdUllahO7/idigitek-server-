@@ -2,13 +2,18 @@
 import express from 'express';
 import { SectionController } from '../controllers/section.controller';
 import multer from 'multer';
+import fs from 'fs';
 
 const router = express.Router();
 const sectionController = new SectionController();
-// Configure multer for file uploads
-const upload = multer({ dest: 'uploads/' });
 
+// Ensure /tmp/uploads directory exists
+const uploadsDir = '/tmp/uploads';
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
 
+const upload = multer({ dest: uploadsDir });
 
 // Get all sections (public route)
 router.get('/', sectionController.getAllSections);
@@ -56,10 +61,14 @@ router.delete(
   '/:id',
   sectionController.deleteSection
 );
+
 router.get('/website/:websiteId', sectionController.getSectionsByWebsiteId);
 router.get('/website/:websiteId/complete', sectionController.getSectionsWithDataByWebsiteId);
+
 // Update section order
 router.patch(
-'/order',  sectionController.updateSectionOrder
+  '/order',
+  sectionController.updateSectionOrder
 );
+
 export default router;

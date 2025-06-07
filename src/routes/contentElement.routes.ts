@@ -1,13 +1,18 @@
-// Update the routes file
 import express from 'express';
 import { authenticate } from '../middleware/auth.middleware';
 import ContentElementController from '../controllers/ContentElement.controller';
 import multer from 'multer';
+import fs from 'fs';
 
 const router = express.Router();
 
-// Configure multer for file uploads
-const upload = multer({ dest: 'uploads/' });
+// Ensure /tmp/uploads directory exists
+const uploadsDir = '/tmp/uploads';
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+const upload = multer({ dest: uploadsDir });
 
 // ContentElement routes
 
