@@ -2,11 +2,17 @@ import express from 'express';
 import { WebSiteController } from '../controllers/WebSite.controller';
 import { authenticate } from '../middleware/auth.middleware';
 import clientWebSiteController from '../controllers/client/clientWebSite.controller';
+import multer from 'multer';
+
 
 const router = express.Router();
 const webSiteController = new WebSiteController();
 
+const upload = multer({ dest: 'uploads/' });
 
+
+// Logo upload route
+router.post('/:id/logo', upload.single('logo'), webSiteController.uploadWebSiteLogo);
 
 
 
