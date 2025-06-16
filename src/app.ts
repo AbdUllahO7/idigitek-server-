@@ -22,6 +22,7 @@ import sectionsItemsRoutes from './routes/sectionItem.routes';
 import webSiteRoutes from './routes/webSite.routes'
 import webSiteThem from './routes/webSiteTheme.route'
 
+import contactForm from './routes/contact.routes'
 
 
 
@@ -93,6 +94,7 @@ app.use(`/api/${apiVersion}/section-items`, sectionsItemsRoutes);
 app.use(`/api/${apiVersion}/websites`, webSiteRoutes);
 app.use(`/api/${apiVersion}/websites`, webSiteRoutes);
 app.use(`/api/${apiVersion}/themes`, webSiteThem);
+app.use(`/api/${apiVersion}/contactForm`,  contactForm);
 
 
 
