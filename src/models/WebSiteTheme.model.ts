@@ -15,6 +15,7 @@ export interface WebSiteThemeProps {
       background: string;
       surface: string;
       text: string;
+      hover:string,
       textSecondary: string;
       border: string;
       success: string;
@@ -31,6 +32,7 @@ export interface WebSiteThemeProps {
       text: string;
       textSecondary: string;
       border: string;
+      hover:string,
       success: string;
       warning: string;
       error: string;
@@ -85,6 +87,7 @@ const WebSiteThemeSchema = new Schema<WebSiteThemeProps>(
         border: { type: String, trim: true, default: '#dee2e6' },
         success: { type: String, trim: true, default: '#28a745' },
         warning: { type: String, trim: true, default: '#ffc107' },
+        hover: { type: String, trim: true, default: '#000000' },
         error: { type: String, trim: true, default: '#dc3545' },
         info: { type: String, trim: true, default: '#17a2b8' },
       },
@@ -100,6 +103,7 @@ const WebSiteThemeSchema = new Schema<WebSiteThemeProps>(
         success: { type: String, trim: true, default: '#2fb344' },
         warning: { type: String, trim: true, default: '#ffca2c' },
         error: { type: String, trim: true, default: '#e35d6a' },
+        hover: { type: String, trim: true, default: '#000000' },
         info: { type: String, trim: true, default: '#22b8cf' },
       },
     },
