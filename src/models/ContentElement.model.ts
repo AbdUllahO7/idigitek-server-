@@ -1,4 +1,3 @@
-// Update ContentElementModel.ts
 import mongoose, { Schema } from 'mongoose';
 import { IContentElement } from '../types/ContentElement.type';
 
@@ -12,7 +11,7 @@ const contentElementSchema = new Schema<IContentElement>(
     },
     type: {
       type: String,
-      enum: ['text', 'heading', 'array',  'paragraph', 'list', 'image', 'video', 'link', 'custom', 'badge', 'textarea'],
+      enum: ['text', 'heading', 'array', 'paragraph', 'file', 'list', 'image', 'video', 'link', 'custom', 'badge', 'textarea'],
       required: true,
       index: true,
     },
@@ -21,6 +20,21 @@ const contentElementSchema = new Schema<IContentElement>(
       trim: true,
     },
     imageUrl: {
+      type: String,
+      trim: true,
+    },
+    fileUrl: {
+      type: String,
+      trim: true,
+    },
+    fileName: {
+      type: String,
+      trim: true,
+    },
+    fileSize: {
+      type: Number,
+    },
+    fileMimeType: {
       type: String,
       trim: true,
     },

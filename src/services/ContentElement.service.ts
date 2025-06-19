@@ -73,6 +73,78 @@ class ContentElementService {
       }
     }
 
+    /**
+     * Upload a file for a content element
+     * @param id Content element ID
+     * @param file The file to upload
+     * @returns Promise with the updated content element
+     */
+    async uploadElementFile(id: string, file: File): Promise<IContentElement> {
+      try {
+        // Validate ID
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+          throw AppError.validation('Invalid content element ID format');
+        }
+
+        // Find the content element
+        const contentElement = await ContentElementModel.findById(id);
+        if (!contentElement) {
+          throw AppError.notFound(`Content element with ID ${id} not found`);
+        }
+
+        // Check if element type is file
+        if (contentElement.type !== 'file') {
+          throw AppError.badRequest('Content element type must be "file" to upload a file');
+        }
+
+        // Validate file type (you can customize allowed types)
+        const allowedTypes = [
+          'application/pdf',
+          'application/msword',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'text/plain',
+          'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'text/csv'
+        ];
+
+        if (!allowedTypes.includes(file.mimetype)) {
+          throw AppError.badRequest('File type not allowed. Supported types: PDF, DOC, DOCX, TXT, XLS, XLSX, CSV');
+        }
+
+        // Validate file size (5MB limit)
+        const maxSize = 5 * 1024 * 1024; // 5MB
+        if (file.size > maxSize) {
+          throw AppError.badRequest('File size must be less than 5MB');
+        }
+
+        // Upload to Cloudinary as a raw file
+        const result = await cloudinaryService.uploadRawFile(file.path, {
+          resource_type: 'raw',
+          public_id: `files/${Date.now()}_${file.originalname}`,
+          use_filename: true,
+          unique_filename: false
+        });
+        
+        // Update content element with file information
+        contentElement.fileUrl = result.secure_url;
+        contentElement.fileName = file.originalname;
+        contentElement.fileSize = file.size;
+        contentElement.fileMimeType = file.mimetype;
+        
+        // Store additional cloudinary data in metadata
+        if (!contentElement.metadata) contentElement.metadata = {};
+        contentElement.metadata.cloudinaryId = result.public_id;
+        contentElement.metadata.resourceType = result.resource_type;
+        
+        // Save and return updated content element
+        return await contentElement.save();
+      } catch (error) {
+        if (error instanceof AppError) throw error;
+        throw AppError.database('Failed to upload file for content element', error);
+      }
+    }
+
   /**
    * Get content element by ID
    * @param id The content element ID
@@ -244,6 +316,19 @@ class ContentElementService {
             // Continue with deletion even if Cloudinary delete fails
           }
         }
+
+        // Check if this is a file type with Cloudinary file
+        if (contentElement.type === 'file' && 
+            contentElement.metadata?.cloudinaryId &&
+            hardDelete) {
+          try {
+            // Delete the file from Cloudinary
+            await cloudinaryService.deleteRawFile(contentElement.metadata.cloudinaryId);
+          } catch (error) {
+            console.error('Failed to delete file from Cloudinary:', error);
+            // Continue with deletion even if Cloudinary delete fails
+          }
+        }
     
         if (hardDelete) {
           // First delete all translations for this element
@@ -295,12 +380,6 @@ class ContentElementService {
         throw AppError.database('Failed to update content elements order', error);
       }
     }
-
-
-
-  
-
-
 }
 
 export default new ContentElementService();

@@ -4,7 +4,7 @@ import mongoose from "mongoose";
 export interface IContentElement {
   _id: mongoose.Types.ObjectId;
   name: string;
-  type: 'text' | 'heading' |'array' | 'paragraph' | 'list' | 'image' | 'video' | 'link' | 'custom' | 'badge' | 'textarea';
+  type: 'text' | 'heading' |'array' | 'paragraph' | 'list' | 'image' | 'video' | 'link' | 'custom' | 'badge' | 'textarea' | 'file';
   defaultContent?: string;
   imageUrl?: string; // Add this field
   isActive: boolean;
@@ -13,6 +13,10 @@ export interface IContentElement {
   parent: mongoose.Types.ObjectId | string;
   createdAt: Date;
   updatedAt: Date;
+  fileUrl?:string,
+  fileName?:string,
+  fileSize?:number,
+  fileMimeType?:string,
   translations : any[],
 }
 

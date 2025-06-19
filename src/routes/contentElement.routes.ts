@@ -23,8 +23,9 @@ router.post('/', authenticate, ContentElementController.createContentElement);
 router.put('/order', authenticate, ContentElementController.updateElementsOrder);
 router.get('/subsection/:subsectionId', ContentElementController.getContentElementsBySubsection);
 
-// Image upload route
+// Upload routes - must come before the :id routes
 router.post('/:id/image', authenticate, upload.single('image'), ContentElementController.uploadElementImage);
+router.post('/:id/file', authenticate, upload.single('file'), ContentElementController.uploadElementFile);
 
 // Routes with the :id parameter should come last
 router.get('/:id', ContentElementController.getContentElementById);

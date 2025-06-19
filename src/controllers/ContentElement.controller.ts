@@ -39,6 +39,33 @@ class ContentElementController {
     }
   });
 
+  uploadElementFile = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const file = req.file as File;
+
+    try {
+      if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+        throw AppError.validation('Invalid content element ID format');
+      }
+
+      if (!file) {
+        throw AppError.badRequest('No file provided');
+      }
+
+      const updatedElement = await ContentElementService.uploadElementFile(
+        req.params.id,
+        file
+      );
+
+      sendSuccess(res, updatedElement, 'Content element file uploaded successfully');
+    } finally {
+      if (file?.path) {
+        fs.remove(file.path).catch(err =>
+          console.error('Error removing temporary file:', err)
+        );
+      }
+    }
+  });
+
   getContentElementById = asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const populateTranslations = req.query.translations === 'true';
     const contentElement = await ContentElementService.getContentElementById(
