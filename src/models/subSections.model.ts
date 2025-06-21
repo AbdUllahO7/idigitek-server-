@@ -57,23 +57,23 @@ const subSectionSchema = new Schema<ICreateSubSection>(
   }
 );
 
-// Add a pre-save middleware to ensure consistency when isMain is true
-subSectionSchema.pre('save', async function(next) {
-  if (this.isMain && !this.section) {
-    // If subsection is marked as main but section isn't set, try to get it from sectionItem
-    try {
-      const SectionItemModel = mongoose.model('SectionItems');
-      const sectionItem = await SectionItemModel.findById(this.sectionItem);
-      if (sectionItem) {
-        this.section = sectionItem.section;
+  // Add a pre-save middleware to ensure consistency when isMain is true
+  subSectionSchema.pre('save', async function(next) {
+    if (this.isMain && !this.section) {
+      // If subsection is marked as main but section isn't set, try to get it from sectionItem
+      try {
+        const SectionItemModel = mongoose.model('SectionItems');
+        const sectionItem = await SectionItemModel.findById(this.sectionItem);
+        if (sectionItem) {
+          this.section = sectionItem.section;
+        }
+      } catch (error) {
+        // Just continue if we can't set the section
+        console.error('Error setting section from sectionItem:', error);
       }
-    } catch (error) {
-      // Just continue if we can't set the section
-      console.error('Error setting section from sectionItem:', error);
     }
-  }
-  next();
-});
+    next();
+  });
 
 const SubSectionModel = mongoose.model<ICreateSubSection>('SubSections', subSectionSchema);
 

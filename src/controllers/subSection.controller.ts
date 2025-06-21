@@ -416,6 +416,29 @@ class SubSectionController {
         sendSuccess(res, subsections, 'Subsections retrieved successfully');
     });
 
+    /**
+     * Get all navigation subsections for a WebSite with all content elements and translations
+     * @route GET /api/subsections/website/:websiteId/navigation
+     */
+    getNavigationSubSectionsByWebSiteId = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+        const activeOnly = req.query.activeOnly !== 'false';
+        const limit = parseInt(req.query.limit as string) || 100;
+        const skip = parseInt(req.query.skip as string) || 0;
+        
+        const navigationSubsections = await subSectionService.getNavigationSubSectionsByWebSiteId(
+            req.params.websiteId,
+            activeOnly,
+            limit,
+            skip
+        );
+        
+        if (navigationSubsections.length === 0) {
+            sendSuccess(res, [], 'No navigation subsections found for this WebSite');
+            return;
+        }
+        
+        sendSuccess(res, navigationSubsections, `Found ${navigationSubsections.length} navigation subsection(s)`);
+    });
 
 }
 

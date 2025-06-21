@@ -145,79 +145,193 @@ export class SectionService {
       throw error;
     }
   }
+// Delete section with complete cascade deletion
+async deleteSection(id: string) {
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
-  // Delete section
-  async deleteSection(id: string) {
-    const session = await mongoose.startSession();
-    session.startTransaction();
-  
-    try {
-      // Get the section with its image
-      const section = await SectionModel.findById(id).session(session);
-      if (!section) {
-        throw new Error('Section not found');
-      }
-      
-      // Store the image URL for later deletion if it exists
-      const imageUrl = section.image;
-      
-      // Delete the section
-      await SectionModel.findByIdAndDelete(id).session(session);
-      
-      // Find all subsections belonging to this section
-      const subsections = await SubSectionModel.find({ sectionId: id }).session(session);
-      const subsectionIds = subsections.map(subsection => subsection._id);
-      
-      // Delete all subsections
-      await SubSectionModel.deleteMany({ sectionId: id }).session(session);
-      
-      // Find all content elements for this section and its subsections
-      const elementIds = await ContentElementModel.find({
-        $or: [
-          { parentType: 'section', parentId: id },
-          { parentType: 'subsection', parentId: { $in: subsectionIds } }
-        ]
-      }).distinct('_id').session(session);
-      
-      // Delete all content elements
-      await ContentElementModel.deleteMany({
-        $or: [
-          { parentType: 'section', parentId: id },
-          { parentType: 'subsection', parentId: { $in: subsectionIds } }
-        ]
-      }).session(session);
-      
-      // Delete all content translations
-      await ContentTranslationModel.deleteMany({
-        elementId: { $in: elementIds }
-      }).session(session);
-      
-      await session.commitTransaction();
-      
-      // Delete the image from Cloudinary if it exists (after transaction is committed)
-      if (imageUrl) {
-        try {
-          const cloudinaryService = require('../services/cloudinary.service').default;
-          const publicId = cloudinaryService.getPublicIdFromUrl(imageUrl);
-          if (publicId) {
-            // Delete in the background, don't wait for it
-            cloudinaryService.deleteImage(publicId).catch(err => {
-              console.error('Failed to delete section image:', err);
-            });
-          }
-        } catch (error) {
-          console.error('Error importing cloudinary service:', error);
-        }
-      }
-      
-      return { message: 'Section deleted successfully' };
-    } catch (error) {
-      await session.abortTransaction();
-      throw error;
-    } finally {
-      session.endSession();
+  try {
+    console.log(`🗑️ Starting cascade deletion for section: ${id}`);
+    
+    // Get the section with its image
+    const section = await SectionModel.findById(id).session(session);
+    if (!section) {
+      throw new Error('Section not found');
     }
+    
+    // Store the image URL for later deletion if it exists
+    const imageUrl = section.image;
+    console.log(`📁 Section found: ${section.name}, Image: ${imageUrl || 'none'}`);
+    
+    // STEP 1: Find all SectionItems belonging to this section
+    const sectionItems = await SectionItemModel.find({ section: id }).session(session);
+    const sectionItemIds = sectionItems.map(item => item._id);
+    console.log(`📦 Found ${sectionItems.length} section items:`, sectionItemIds);
+    
+    // STEP 2: Find all SubSections belonging to this section (both direct and through section items)
+    const subsections = await SubSectionModel.find({
+      $or: [
+        { section: id }, // Direct relationship
+        { sectionItem: { $in: sectionItemIds } } // Through section items
+      ]
+    }).session(session);
+    const subsectionIds = subsections.map(subsection => subsection._id);
+    console.log(`📑 Found ${subsections.length} subsections:`, subsectionIds);
+    
+    // STEP 3: Find all ContentElements for section, section items, and subsections
+    const contentElements = await ContentElementModel.find({
+      $or: [
+        // Elements directly belonging to the section
+        { parent: id },
+        // Elements belonging to section items
+        { parent: { $in: sectionItemIds } },
+        // Elements belonging to subsections
+        { parent: { $in: subsectionIds } },
+        // Legacy format - if you're using parentType/parentId
+        { parentType: 'section', parentId: id },
+        { parentType: 'sectionItem', parentId: { $in: sectionItemIds } },
+        { parentType: 'subsection', parentId: { $in: subsectionIds } }
+      ]
+    }).session(session);
+    const contentElementIds = contentElements.map(element => element._id);
+    console.log(`🧩 Found ${contentElements.length} content elements:`, contentElementIds);
+    
+    // STEP 4: Delete all ContentTranslations for these elements
+    const deletedTranslations = await ContentTranslationModel.deleteMany({
+      $or: [
+        { contentElement: { $in: contentElementIds } },
+        { elementId: { $in: contentElementIds } } // Handle both field names
+      ]
+    }).session(session);
+    console.log(`🌐 Deleted ${deletedTranslations.deletedCount} content translations`);
+    
+    // STEP 5: Delete all ContentElements
+    const deletedElements = await ContentElementModel.deleteMany({
+      $or: [
+        // Elements directly belonging to the section
+        { parent: id },
+        // Elements belonging to section items
+        { parent: { $in: sectionItemIds } },
+        // Elements belonging to subsections
+        { parent: { $in: subsectionIds } },
+        // Legacy format
+        { parentType: 'section', parentId: id },
+        { parentType: 'sectionItem', parentId: { $in: sectionItemIds } },
+        { parentType: 'subsection', parentId: { $in: subsectionIds } }
+      ]
+    }).session(session);
+    console.log(`🧩 Deleted ${deletedElements.deletedCount} content elements`);
+    
+    // STEP 6: Delete all SubSections
+    const deletedSubsections = await SubSectionModel.deleteMany({
+      $or: [
+        { section: id },
+        { sectionItem: { $in: sectionItemIds } }
+      ]
+    }).session(session);
+    console.log(`📑 Deleted ${deletedSubsections.deletedCount} subsections`);
+    
+    // STEP 7: Delete all SectionItems
+    const deletedSectionItems = await SectionItemModel.deleteMany({ 
+      section: id 
+    }).session(session);
+    console.log(`📦 Deleted ${deletedSectionItems.deletedCount} section items`);
+    
+    // STEP 8: Finally, delete the section itself
+    const deletedSection = await SectionModel.findByIdAndDelete(id).session(session);
+    console.log(`🗑️ Deleted section: ${deletedSection?.name}`);
+    
+    // Commit the transaction
+    await session.commitTransaction();
+    console.log(`✅ Successfully deleted section ${id} and all related data`);
+    
+    // STEP 9: Delete the image from Cloudinary if it exists (after transaction is committed)
+    if (imageUrl) {
+      try {
+        const cloudinaryService = require('../services/cloudinary.service').default;
+        const publicId = cloudinaryService.getPublicIdFromUrl(imageUrl);
+        if (publicId) {
+          console.log(`🖼️ Deleting image from Cloudinary: ${publicId}`);
+          // Delete in the background, don't wait for it
+          cloudinaryService.deleteImage(publicId).catch((err: any) => {
+            console.error('Failed to delete section image:', err);
+          });
+        }
+      } catch (error) {
+        console.error('Error importing cloudinary service:', error);
+      }
+    }
+    
+    return { 
+      message: 'Section and all related data deleted successfully',
+      deletedCounts: {
+        sections: 1,
+        sectionItems: deletedSectionItems.deletedCount,
+        subsections: deletedSubsections.deletedCount,
+        contentElements: deletedElements.deletedCount,
+        contentTranslations: deletedTranslations.deletedCount
+      }
+    };
+    
+  } catch (error) {
+    await session.abortTransaction();
+    console.error(`❌ Error deleting section ${id}:`, error);
+    throw error;
+  } finally {
+    session.endSession();
   }
+}
+
+// Helper method to verify deletion was complete
+async verifyDeletionComplete(sectionId: string) {
+  try {
+    console.log(`🔍 Verifying deletion for section: ${sectionId}`);
+    
+    // Check if section still exists
+    const section = await SectionModel.findById(sectionId);
+    console.log(`Section exists: ${!!section}`);
+    
+    // Check for orphaned section items
+    const orphanedSectionItems = await SectionItemModel.find({ section: sectionId });
+    console.log(`Orphaned section items: ${orphanedSectionItems.length}`);
+    
+    // Check for orphaned subsections
+    const orphanedSubsections = await SubSectionModel.find({ 
+      $or: [
+        { section: sectionId },
+        { sectionItem: { $in: orphanedSectionItems.map(item => item._id) } }
+      ]
+    });
+    console.log(`Orphaned subsections: ${orphanedSubsections.length}`);
+    
+    // Check for orphaned content elements
+    const orphanedElements = await ContentElementModel.find({
+      $or: [
+        { parent: sectionId },
+        { parentType: 'section', parentId: sectionId }
+      ]
+    });
+    console.log(`Orphaned content elements: ${orphanedElements.length}`);
+    
+    const isComplete = !section && 
+                      orphanedSectionItems.length === 0 && 
+                      orphanedSubsections.length === 0 && 
+                      orphanedElements.length === 0;
+    
+    return {
+      isComplete,
+      orphanedData: {
+        section: !!section,
+        sectionItems: orphanedSectionItems.length,
+        subsections: orphanedSubsections.length,
+        contentElements: orphanedElements.length
+      }
+    };
+  } catch (error) {
+    console.error('Error verifying deletion:', error);
+    throw error;
+  }
+}
 
   // Get section with all related content (subsections and content elements)
   async getSectionWithContent(id: string, languageId: string) {

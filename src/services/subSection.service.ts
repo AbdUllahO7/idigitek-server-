@@ -1429,6 +1429,112 @@ class SubSectionService {
             throw AppError.database('Failed to retrieve subsections by section item IDs', error);
         }
     }
+ /**
+ * Get all navigation subsections by WebSite ID with all content elements and translations
+ * @param websiteId The WebSite ID
+ * @param activeOnly Whether to return only active content
+ * @param limit Maximum number of subsections to return
+ * @param skip Number of subsections to skip
+ * @returns Promise with array of navigation subsections data including elements and translations
+ */
+async getNavigationSubSectionsByWebSiteId(
+    websiteId: string,
+    activeOnly = true,
+    limit = 100,
+    skip = 0
+): Promise<any[]> {
+    try {
+        if (!mongoose.Types.ObjectId.isValid(websiteId)) {
+            throw AppError.validation('Invalid WebSite ID format');
+        }
+
+        // Build the query to get navigation subsections
+        const query: any = { 
+            WebSiteId: websiteId,
+            name: 'Navigation'
+        };
+        
+        if (activeOnly) {
+            query.isActive = true;
+        }
+        
+        // Get all navigation subsections with basic population
+        const subsections = await SubSectionModel.find(query)
+            .sort({ order: 1, createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .populate({
+                path: 'sectionItem',
+                populate: {
+                    path: 'section'
+                },
+                match: activeOnly ? { isActive: true } : {}
+            })
+            .populate('section')
+            .populate('languages');
+        
+        if (subsections.length === 0) {
+            return [];
+        }
+
+        // Get all subsection IDs
+        const subsectionIds = subsections.map(sub => sub._id);
+
+        // Get all content elements for these subsections
+        const contentElements = await ContentElementModel.find({
+            parent: { $in: subsectionIds },
+            isActive: activeOnly
+        }).sort({ order: 1 });
+
+        // Get all element IDs
+        const elementIds = contentElements.map(element => element._id);
+
+        // Get all translations for these elements in a single query
+        const translations = await ContentTranslationModel.find({
+            contentElement: { $in: elementIds },
+            isActive: activeOnly
+        }).populate('language');
+
+        // Group translations by content element ID
+        const translationsByElement: Record<string, any[]> = {};
+        
+        translations.forEach(translation => {
+            const elementId = translation.contentElement.toString();
+            if (!translationsByElement[elementId]) {
+                translationsByElement[elementId] = [];
+            }
+            translationsByElement[elementId].push(translation);
+        });
+
+        // Group content elements by subsection ID
+        const elementsBySubsection: Record<string, any[]> = {};
+        
+        contentElements.forEach(element => {
+            const subsectionId = element.parent.toString();
+            if (!elementsBySubsection[subsectionId]) {
+                elementsBySubsection[subsectionId] = [];
+            }
+            
+            const elementData = element.toObject();
+            const elementId = element._id.toString();
+            elementData.translations = translationsByElement[elementId] || [];
+            elementsBySubsection[subsectionId].push(elementData);
+        });
+
+        // Create complete result with subsections and their elements
+        const result = subsections.map(subsection => {
+            const subsectionData = subsection.toObject();
+            const subsectionId = subsection._id.toString();
+            subsectionData.elements = elementsBySubsection[subsectionId] || [];
+            return subsectionData;
+        });
+
+        return result;
+    } catch (error) {
+        if (error instanceof AppError) throw error;
+        throw AppError.database('Failed to retrieve navigation subsections by WebSite ID', error);
+    }
+}
 }
 
 export default new SubSectionService();

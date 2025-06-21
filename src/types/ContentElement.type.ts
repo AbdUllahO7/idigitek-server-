@@ -4,7 +4,7 @@ import mongoose from "mongoose";
 export interface IContentElement {
   _id: mongoose.Types.ObjectId;
   name: string;
-  type: 'text' | 'heading' |'array' | 'paragraph' | 'list' | 'image' | 'video' | 'link' | 'custom' | 'badge' | 'textarea' | 'file';
+  type: 'text' | 'heading' |'array' | 'paragraph' | 'list' | 'image' | 'video' | 'link' | 'custom' | 'badge' | 'textarea' | 'file' | 'boolean';
   defaultContent?: string;
   imageUrl?: string; // Add this field
   isActive: boolean;

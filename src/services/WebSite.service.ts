@@ -6,6 +6,11 @@ import WebSiteUserModel from "../models/webSiteUser.model";
 import { WebSiteProps } from "../types/WebSite.type";
 import cloudinaryService from "./cloudinary.service";
 import { File } from 'multer';
+import SubSectionModel from "../models/subSections.model";
+import ContentElementModel from "../models/ContentElement.model";
+import SectionItemModel from "../models/sectionItems.model";
+import SectionModel from "../models/sections.model";
+import ContentTranslationModel from "../models/ContentTranslation.model";
 
 export class WebSiteService {
     /**
@@ -138,7 +143,30 @@ export class WebSiteService {
     /**
      * Delete a website by ID
      */
-    async deleteWebSite(id: string, userId: string): Promise<WebSiteProps | null> {
+   
+    /**
+     * Delete a website by ID with complete cascade deletion
+     * @param id The website ID
+     * @param userId The user requesting the deletion
+     * @param hardDelete Whether to permanently delete (default: true for complete removal)
+     * @returns Promise with deletion results
+     */
+    async deleteWebSite(id: string, userId: string, hardDelete = true): Promise<{
+        success: boolean;
+        message: string;
+        deletedCounts?: {
+            websites: number;
+            websiteUsers: number;
+            sections: number;
+            sectionItems: number;
+            subsections: number;
+            contentElements: number;
+            contentTranslations: number;
+            imagesDeleted: number;
+        };
+    }> {
+       
+
         // Verify the user has permission to delete this website
         const websiteUser = await WebSiteUserModel.findOne({ 
             webSiteId: id, 
@@ -149,26 +177,204 @@ export class WebSiteService {
         if (!websiteUser) {
             throw new AppError('You do not have permission to delete this website', 403);
         }
-        
+
         const session = await mongoose.startSession();
         session.startTransaction();
         
         try {
-            // Delete all user associations for this website
-            await WebSiteUserModel.deleteMany({ webSiteId: id }, { session });
+            console.log(`🗑️ Starting cascade deletion for website: ${id}`);
             
-            // Delete the website
+            // Get the website with its logo
+            const website = await WebSiteModel.findById(id).session(session);
+            if (!website) {
+                throw new AppError('Website not found', 404);
+            }
+            
+            // Store images for later deletion
+            const imagesToDelete: string[] = [];
+            if (website.logo) {
+                imagesToDelete.push(website.logo);
+            }
+            
+            console.log(`📁 Website found: ${website.name}, Logo: ${website.logo || 'none'}`);
+            
+            // STEP 1: Find all Sections belonging to this website
+            const sections = await SectionModel.find({ WebSiteId: id }).session(session);
+            const sectionIds = sections.map(section => section._id);
+            console.log(`📂 Found ${sections.length} sections:`, sectionIds);
+            
+            // Collect section images
+            sections.forEach(section => {
+                if (section.image) {
+                    imagesToDelete.push(section.image);
+                }
+            });
+            
+            // STEP 2: Find all SectionItems belonging to this website
+            const sectionItems = await SectionItemModel.find({
+                $or: [
+                    { WebSiteId: id }, // Direct relationship
+                    { section: { $in: sectionIds } } // Through sections
+                ]
+            }).session(session);
+            const sectionItemIds = sectionItems.map(item => item._id);
+            console.log(`📦 Found ${sectionItems.length} section items:`, sectionItemIds);
+            
+            // Collect section item images
+            sectionItems.forEach(item => {
+                if (item.image) {
+                    imagesToDelete.push(item.image);
+                }
+            });
+            
+            // STEP 3: Find all SubSections belonging to this website
+            const subsections = await SubSectionModel.find({
+                $or: [
+                    { WebSiteId: id }, // Direct relationship
+                    { section: { $in: sectionIds } }, // Through sections
+                    { sectionItem: { $in: sectionItemIds } } // Through section items
+                ]
+            }).session(session);
+            const subsectionIds = subsections.map(subsection => subsection._id);
+            console.log(`📑 Found ${subsections.length} subsections:`, subsectionIds);
+            
+            // STEP 4: Find all ContentElements for website, sections, section items, and subsections
+            const contentElements = await ContentElementModel.find({
+                $or: [
+                    // Elements directly belonging to the website
+                    { parent: id },
+                    // Elements belonging to sections
+                    { parent: { $in: sectionIds } },
+                    // Elements belonging to section items
+                    { parent: { $in: sectionItemIds } },
+                    // Elements belonging to subsections
+                    { parent: { $in: subsectionIds } },
+                    // Legacy format - if you're using parentType/parentId
+                    { parentType: 'website', parentId: id },
+                    { parentType: 'section', parentId: { $in: sectionIds } },
+                    { parentType: 'sectionItem', parentId: { $in: sectionItemIds } },
+                    { parentType: 'subsection', parentId: { $in: subsectionIds } }
+                ]
+            }).session(session);
+            const contentElementIds = contentElements.map(element => element._id);
+            console.log(`🧩 Found ${contentElements.length} content elements:`, contentElementIds);
+            
+            // Collect content element images
+            contentElements.forEach(element => {
+                if (element.imageUrl) {
+                    imagesToDelete.push(element.imageUrl);
+                }
+            });
+            
+            // STEP 5: Delete all ContentTranslations for these elements
+            const deletedTranslations = await ContentTranslationModel.deleteMany({
+                $or: [
+                    { contentElement: { $in: contentElementIds } },
+                    { elementId: { $in: contentElementIds } } // Handle both field names
+                ]
+            }).session(session);
+            console.log(`🌐 Deleted ${deletedTranslations.deletedCount} content translations`);
+            
+            // STEP 6: Delete all ContentElements
+            const deletedElements = await ContentElementModel.deleteMany({
+                $or: [
+                    { parent: id },
+                    { parent: { $in: sectionIds } },
+                    { parent: { $in: sectionItemIds } },
+                    { parent: { $in: subsectionIds } },
+                    { parentType: 'website', parentId: id },
+                    { parentType: 'section', parentId: { $in: sectionIds } },
+                    { parentType: 'sectionItem', parentId: { $in: sectionItemIds } },
+                    { parentType: 'subsection', parentId: { $in: subsectionIds } }
+                ]
+            }).session(session);
+            console.log(`🧩 Deleted ${deletedElements.deletedCount} content elements`);
+            
+            // STEP 7: Delete all SubSections
+            const deletedSubsections = await SubSectionModel.deleteMany({
+                $or: [
+                    { WebSiteId: id },
+                    { section: { $in: sectionIds } },
+                    { sectionItem: { $in: sectionItemIds } }
+                ]
+            }).session(session);
+            console.log(`📑 Deleted ${deletedSubsections.deletedCount} subsections`);
+            
+            // STEP 8: Delete all SectionItems
+            const deletedSectionItems = await SectionItemModel.deleteMany({
+                $or: [
+                    { WebSiteId: id },
+                    { section: { $in: sectionIds } }
+                ]
+            }).session(session);
+            console.log(`📦 Deleted ${deletedSectionItems.deletedCount} section items`);
+            
+            // STEP 9: Delete all Sections
+            const deletedSections = await SectionModel.deleteMany({
+                WebSiteId: id
+            }).session(session);
+            console.log(`📂 Deleted ${deletedSections.deletedCount} sections`);
+            
+            // STEP 10: Delete all WebSiteUser associations
+            const deletedWebsiteUsers = await WebSiteUserModel.deleteMany({
+                webSiteId: id
+            }).session(session);
+            console.log(`👥 Deleted ${deletedWebsiteUsers.deletedCount} website user associations`);
+            
+            // STEP 11: Finally, delete the website itself
             const deletedWebsite = await WebSiteModel.findByIdAndDelete(id).session(session);
+            console.log(`🗑️ Deleted website: ${deletedWebsite?.name}`);
             
+            // Commit the transaction
             await session.commitTransaction();
-            return deletedWebsite;
+            console.log(`✅ Successfully deleted website ${id} and all related data`);
+            
+            // STEP 12: Delete all images from Cloudinary (after transaction is committed)
+            let imagesDeleted = 0;
+            if (imagesToDelete.length > 0) {
+                console.log(`🖼️ Deleting ${imagesToDelete.length} images from Cloudinary`);
+                
+                for (const imageUrl of imagesToDelete) {
+                    try {
+                        const publicId = cloudinaryService.getPublicIdFromUrl(imageUrl);
+                        if (publicId) {
+                            await cloudinaryService.deleteImage(publicId);
+                            imagesDeleted++;
+                            console.log(`🖼️ Deleted image: ${publicId}`);
+                        }
+                    } catch (imageError) {
+                        console.error(`Failed to delete image ${imageUrl}:`, imageError);
+                        // Don't throw error for image deletion failures
+                    }
+                }
+            }
+            
+            return { 
+                success: true,
+                message: 'Website and all related data deleted successfully',
+                deletedCounts: {
+                    websites: 1,
+                    websiteUsers: deletedWebsiteUsers.deletedCount,
+                    sections: deletedSections.deletedCount,
+                    sectionItems: deletedSectionItems.deletedCount,
+                    subsections: deletedSubsections.deletedCount,
+                    contentElements: deletedElements.deletedCount,
+                    contentTranslations: deletedTranslations.deletedCount,
+                    imagesDeleted
+                }
+            };
+            
         } catch (error) {
             await session.abortTransaction();
-            throw error;
+            console.error(`❌ Error deleting website ${id}:`, error);
+            if (error instanceof AppError) throw error;
+            throw new AppError('Failed to delete website', 500);
         } finally {
             session.endSession();
         }
     }
+
+
     
     /**
      * Add a user to a website

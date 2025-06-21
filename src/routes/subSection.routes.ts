@@ -41,6 +41,5 @@ router.patch('/:id/order', subSectionController.updateSubSectionOrder);
 router.patch('/:id/move/:direction', subSectionController.moveSubSection);
 router.patch('/:id/activate', subSectionController.activateDeactivateSubSection);
 router.post('/sectionItems', subSectionController.getSubSectionsBySectionItemIds);
-
-
+router.get('/website/:websiteId/navigation', subSectionController.getNavigationSubSectionsByWebSiteId); // NEW ROUTE - Returns ALL navigation subsections
 export default router;
