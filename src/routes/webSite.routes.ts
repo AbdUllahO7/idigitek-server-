@@ -17,7 +17,7 @@ if (!fs.existsSync(uploadsDir)) {
 const upload = multer({ dest: uploadsDir });
 
 // Logo upload route
-router.post('/:id/logo', upload.single('logo'), webSiteController.uploadWebSiteLogo);
+router.post('/:id/logos', upload.single('logo'), webSiteController.uploadWebSiteLogo);
 
 // Website routes
 router.route('/')
