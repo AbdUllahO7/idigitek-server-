@@ -3,9 +3,10 @@ import { Request, Response } from 'express';
 import { sendSuccess } from '../utils/responseHandler';
 import { SectionService } from '../services/section.service';
 import { AppError, asyncHandler } from '../middleware/errorHandler.middleware';
+
 /**
  * Section Controller
- * Handles all section-related requests
+ * Handles all section-related requests with multilingual support
  */
 export class SectionController {
   private sectionService: SectionService;
@@ -29,10 +30,7 @@ export class SectionController {
       throw AppError.badRequest('No image file provided');
     }
     
-    // Get the uploaded image URL from the request file (provided by Cloudinary)
     const imageUrl = (req.file as any).path;
-    
-    // Update the section with the new image URL
     const section = await this.sectionService.updateSection(id, { image: imageUrl });
     
     if (!section) {
@@ -43,18 +41,43 @@ export class SectionController {
   });
 
   /**
-   * Create a new section
+   * 🎯 UPDATED: Create a new section with multilingual support
    */
   createSection = asyncHandler(async (req: Request, res: Response) => {
-    const { name, description, image, isActive, order , WebSiteId , subName} = req.body;
-    if (!name) {
-      throw AppError.badRequest('name is required');
+    const { name, description, image, isActive, order, WebSiteId, subName } = req.body;
+    
+    // 🎯 NEW: Validate multilingual name structure
+    if (!name || typeof name !== 'object') {
+      throw AppError.badRequest('Multilingual name object is required');
     }
     
+    if (!name.en || !name.ar || !name.tr) {
+      throw AppError.badRequest('Section name is required in all languages (en, ar, tr)');
+    }
+    
+    if (!subName) {
+      throw AppError.badRequest('subName is required');
+    }
+    
+    if (!WebSiteId) {
+      throw AppError.badRequest('WebSiteId is required');
+    }
+    
+    // 🎯 NEW: Prepare multilingual description
+    const multilingualDescription = {
+      en: description?.en || '',
+      ar: description?.ar || '',
+      tr: description?.tr || ''
+    };
+    
     const section = await this.sectionService.createSection({
-      name,
+      name: {
+        en: name.en.trim(),
+        ar: name.ar.trim(),
+        tr: name.tr.trim()
+      },
       subName,
-      description,
+      description: multilingualDescription,
       image,
       isActive,
       order,
@@ -65,10 +88,10 @@ export class SectionController {
   });
 
   /**
-   * Get all sections with optional filtering
+   * 🎯 UPDATED: Get all sections with optional language support
    */
   getAllSections = asyncHandler(async (req: Request, res: Response) => {
-    const { isActive } = req.query;
+    const { isActive, language } = req.query;
     const query: any = {};
     
     if (isActive !== undefined) {
@@ -76,18 +99,32 @@ export class SectionController {
     }
     
     const sections = await this.sectionService.getAllSections(query);
+    
+    // 🎯 FIXED: Use proper typing for transformed data
+    let responseData: any[];
+    if (language && ['en', 'ar', 'tr'].includes(language as string)) {
+      responseData = sections.map(section => ({
+        ...section.toObject(),
+        displayName: this.sectionService.getSectionNameByLanguage(section, language as 'en' | 'ar' | 'tr'),
+        displayDescription: this.sectionService.getSectionDescriptionByLanguage(section, language as 'en' | 'ar' | 'tr')
+      }));
+    } else {
+      responseData = sections.map(section => section.toObject());
+    }
+    
     return res.status(200).json({
       success: true,
-      count: sections.length,
-      data: sections
+      count: responseData.length,
+      data: responseData
     });
   });
 
   /**
-   * Get section by ID
+   * 🎯 UPDATED: Get section by ID with optional language support
    */
   getSectionById = asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
+    const { language } = req.query;
     
     if (!id) {
       throw AppError.badRequest('Section ID is required');
@@ -99,17 +136,55 @@ export class SectionController {
       throw AppError.notFound('Section not found');
     }
     
-    return sendSuccess(res, section, 'Section retrieved successfully');
+    // 🎯 NEW: Add display name and description based on language
+    let responseData = section.toObject();
+    if (language && ['en', 'ar', 'tr'].includes(language as string)) {
+      responseData = {
+        ...responseData,
+        displayName: this.sectionService.getSectionNameByLanguage(section, language as 'en' | 'ar' | 'tr'),
+        
+        displayDescription: this.sectionService.getSectionDescriptionByLanguage(section, language as 'en' | 'ar' | 'tr')
+      };
+    }
+    
+    return sendSuccess(res, responseData, 'Section retrieved successfully');
   });
 
   /**
-   * Update section
+   * 🎯 UPDATED: Update section with multilingual support
    */
   updateSection = asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
     
     if (!id) {
       throw AppError.badRequest('Section ID is required');
+    }
+    
+    // 🎯 NEW: Validate multilingual name if provided
+    if (req.body.name) {
+      if (typeof req.body.name !== 'object') {
+        throw AppError.badRequest('Name must be a multilingual object');
+      }
+      
+      if (!req.body.name.en || !req.body.name.ar || !req.body.name.tr) {
+        throw AppError.badRequest('Section name is required in all languages (en, ar, tr)');
+      }
+      
+      // Trim all names
+      req.body.name = {
+        en: req.body.name.en.trim(),
+        ar: req.body.name.ar.trim(),
+        tr: req.body.name.tr.trim()
+      };
+    }
+    
+    // 🎯 NEW: Handle multilingual description if provided
+    if (req.body.description && typeof req.body.description === 'object') {
+      req.body.description = {
+        en: req.body.description.en || '',
+        ar: req.body.description.ar || '',
+        tr: req.body.description.tr || ''
+      };
     }
     
     const section = await this.sectionService.updateSection(id, req.body);
@@ -122,7 +197,7 @@ export class SectionController {
   });
 
   /**
-   * Update section active status
+   * Update section active status (unchanged)
    */
   updateSectionStatus = asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
@@ -150,7 +225,7 @@ export class SectionController {
   });
 
   /**
-   * Delete section
+   * Delete section (unchanged)
    */
   deleteSection = asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
@@ -165,7 +240,7 @@ export class SectionController {
   });
 
   /**
-   * Get section with content by ID and language
+   * Get section with content by ID and language (unchanged)
    */
   getSectionWithContent = asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
@@ -189,8 +264,7 @@ export class SectionController {
   });
   
   /**
-   * Get section with all related data (section items and subsections)
-   * @route GET /api/sections/:id/complete
+   * Get section with all related data (section items and subsections) (unchanged)
    */
   getSectionWithCompleteData = asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
@@ -200,7 +274,6 @@ export class SectionController {
       throw AppError.badRequest('Section ID is required');
     }
     
-    // Convert string query param to boolean
     const includeInactiveItems = includeInactive === 'true';
     
     const section = await this.sectionService.getSectionWithCompleteData(
@@ -217,19 +290,16 @@ export class SectionController {
   });
 
   /**
-   * Get all sections with their related data
-   * @route GET /api/sections/all/complete
+   * 🎯 UPDATED: Get all sections with their related data and language support
    */
   getAllSectionsWithData = asyncHandler(async (req: Request, res: Response) => {
-    const { isActive, includeInactive, languageId } = req.query;
+    const { isActive, includeInactive, languageId, language } = req.query;
     const query: any = {};
     
-    // Filter active/inactive sections
     if (isActive !== undefined) {
       query.isActive = isActive === 'true';
     }
     
-    // Convert string query param to boolean
     const includeInactiveItems = includeInactive === 'true';
     
     const sections = await this.sectionService.getAllSectionsWithData(
@@ -238,41 +308,60 @@ export class SectionController {
       languageId as string | undefined
     );
     
+    // 🎯 FIXED: Use proper typing for transformed data
+    let responseData: any[];
+    if (language && ['en', 'ar', 'tr'].includes(language as string)) {
+      responseData = sections.map(section => ({
+        ...section,
+        displayName: this.sectionService.getSectionNameByLanguage(section, language as 'en' | 'ar' | 'tr'),
+        displayDescription: this.sectionService.getSectionDescriptionByLanguage(section, language as 'en' | 'ar' | 'tr')
+      }));
+    } else {
+      responseData = sections;
+    }
+    
     return res.status(200).json({
       success: true,
-      count: sections.length,
-      data: sections
+      count: responseData.length,
+      data: responseData
     });
   });
 
-
   /**
-   * Get all sections for a specific website
-   * @route GET /api/sections/website/:websiteId
+   * 🎯 UPDATED: Get all sections for a specific website with language support
    */
   getSectionsByWebsiteId = asyncHandler(async (req: Request, res: Response) => {
     const { websiteId } = req.params;
-    const { includeInactive } = req.query;
+    const { includeInactive, language } = req.query;
     
     if (!websiteId) {
       throw AppError.badRequest('Website ID is required');
     }
     
-    // Convert string query param to boolean
     const showInactive = includeInactive === 'true';
-    
     const sections = await this.sectionService.getSectionsByWebsiteId(websiteId, showInactive);
+    
+    // 🎯 FIXED: Use proper typing for transformed data
+    let responseData: any[];
+    if (language && ['en', 'ar', 'tr'].includes(language as string)) {
+      responseData = sections.map(section => ({
+        ...section.toObject(),
+        displayName: this.sectionService.getSectionNameByLanguage(section, language as 'en' | 'ar' | 'tr'),
+        displayDescription: this.sectionService.getSectionDescriptionByLanguage(section, language as 'en' | 'ar' | 'tr')
+      }));
+    } else {
+      responseData = sections.map(section => section.toObject());
+    }
     
     return res.status(200).json({
       success: true,
-      count: sections.length,
-      data: sections
+      count: responseData.length,
+      data: responseData
     });
   });
 
   /**
-   * Get all sections with complete data for a specific website
-   * @route GET /api/sections/website/:websiteId/complete
+   * Get all sections with complete data for a specific website (unchanged)
    */
   getSectionsWithDataByWebsiteId = asyncHandler(async (req: Request, res: Response) => {
     const { websiteId } = req.params;
@@ -282,7 +371,6 @@ export class SectionController {
       throw AppError.badRequest('Website ID is required');
     }
     
-    // Convert string query param to boolean
     const showInactive = includeInactive === 'true';
     
     const sectionsWithData = await this.sectionService.getSectionsWithDataByWebsiteId(
@@ -297,12 +385,12 @@ export class SectionController {
       data: sectionsWithData
     });
   });
+
   /**
- * Update section order
- * @route PATCH /api/sections/:id/order
- */
+   * Update section order (unchanged)
+   */
   updateSectionOrder = asyncHandler(async (req: Request, res: Response) => {
-    const sections = req.body; // Expect array of { id, order, websiteId }
+    const sections = req.body;
 
     if (!Array.isArray(sections) || sections.length === 0) {
       throw AppError.badRequest('Sections array is required');
@@ -317,5 +405,5 @@ export class SectionController {
     );
 
     return sendSuccess(res, updatedSections, 'Section order updated successfully');
-  })
+  });
 }

@@ -1,34 +1,82 @@
 import mongoose, { Schema } from "mongoose";
 
+// Multilingual name interface
+interface IMultilingualName {
+  en: string;
+  ar: string;
+  tr: string;
+}
+
+// Multilingual description interface
+interface IMultilingualDescription {
+  en?: string;
+  ar?: string;
+  tr?: string;
+}
+
 interface ISection {
-  name: string;
-  subName: string; 
-  description: string;
+  name: IMultilingualName; // 🎯 UPDATED: Multilingual name object
+  subName: string; // Keep original subName for backend matching
+  description: IMultilingualDescription; // 🎯 UPDATED: Multilingual description
   image: string;
   isActive: boolean;
   order: number;
   WebSiteId: Schema.Types.ObjectId;
-  sectionItems: Schema.Types.ObjectId[]; // Added reference to section items
+  sectionItems: Schema.Types.ObjectId[];
   createdAt: Date;
   updatedAt: Date;
 }
 
+const multilingualNameSchema = new Schema<IMultilingualName>({
+  en: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  ar: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  tr: {
+    type: String,
+    required: true,
+    trim: true
+  }
+}, { _id: false });
+
+const multilingualDescriptionSchema = new Schema<IMultilingualDescription>({
+  en: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  ar: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  tr: {
+    type: String,
+    trim: true,
+    default: ''
+  }
+}, { _id: false });
+
 const sectionSchema = new Schema<ISection>(
   {
     name: {
-      type: String,
-      required: true,
-      trim: true
+      type: multilingualNameSchema,
+      required: true
     },
-     subName: {
+    subName: {
       type: String,
       required: true,
       trim: true
     },
     description: {
-      type: String,
-      trim: true,
-      default: ''
+      type: multilingualDescriptionSchema,
+      default: () => ({ en: '', ar: '', tr: '' })
     },
     image: {
       type: String,
@@ -57,9 +105,16 @@ const sectionSchema = new Schema<ISection>(
   }
 );
 
-// Add compound index for name and WebSiteId - this is the key change!
-// This ensures that section names are unique within a website but can be duplicated across websites
-sectionSchema.index({ name: 1, WebSiteId: 1 }, { unique: true });
+// 🎯 UPDATED: Compound indexes for multilingual name uniqueness
+// Ensure English names are unique within a website
+sectionSchema.index({ 'name.en': 1, WebSiteId: 1 }, { unique: true });
+// Ensure Arabic names are unique within a website  
+sectionSchema.index({ 'name.ar': 1, WebSiteId: 1 }, { unique: true });
+// Ensure Turkish names are unique within a website
+sectionSchema.index({ 'name.tr': 1, WebSiteId: 1 }, { unique: true });
+
+// Index for subName and WebSiteId for backend matching
+sectionSchema.index({ subName: 1, WebSiteId: 1 }, { unique: true });
 
 const SectionModel = mongoose.model<ISection>('Sections', sectionSchema);
 export default SectionModel;
