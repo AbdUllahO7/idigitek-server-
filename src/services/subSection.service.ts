@@ -609,7 +609,6 @@ class SubSectionService {
         populateSectionItem = true
     ): Promise<any> {
 
-        console.log("getCompleteSubSectionById" , id)
         try {
             if (!mongoose.Types.ObjectId.isValid(id)) {
                 throw AppError.validation('Invalid subsection ID format');
@@ -1269,7 +1268,6 @@ class SubSectionService {
                         newMainSubsection.isMain = true;
                         await newMainSubsection.save();
                         
-                        console.log(`Subsection ${newMainSubsection._id} is now the main subsection`);
                     }
                 }
             }

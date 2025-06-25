@@ -17,13 +17,10 @@ async getWebSitesByUserIdWithDetails(userId: string): Promise<WebSiteProps[]> {
         }
 
         const websiteUsers = await WebSiteUserModel.find({ userId });
-        console.log('WebsiteUsers:', websiteUsers);
 
         const websiteIds = websiteUsers.map(wu => wu.webSiteId);
-        console.log('WebsiteIds:', websiteIds);
 
         if (!websiteIds.length) {
-            console.log('No websites found for userId:', userId);
             return [];
         }
 
@@ -45,8 +42,6 @@ async getWebSitesByUserIdWithDetails(userId: string): Promise<WebSiteProps[]> {
                 model: 'Languages',
                 select: 'language languageID websiteId isActive createdAt updatedAt'
             });
-
-        console.log('Websites:', websites);
         return websites;
     } catch (error: any) {
         console.error('Error in getWebSitesByUserIdWithDetails:', {

@@ -180,7 +180,6 @@ class SectionItemService {
             throw AppError.validation('Invalid section ID format');
         }
 
-        console.log(`Fetching section items for section ID: ${sectionId}, activeOnly: ${activeOnly}, limit: ${limit}, skip: ${skip}`);
 
         // Build the query
         const query: any = { 
@@ -394,7 +393,6 @@ class SectionItemService {
         session.startTransaction();
 
         try {
-            console.log(`🗑️ Starting cascade deletion for section item: ${id}`);
             
             if (!mongoose.Types.ObjectId.isValid(id)) {
                 throw AppError.validation('Invalid section item ID format');
@@ -409,14 +407,12 @@ class SectionItemService {
             // Store the image URL and parent section for later operations
             const imageUrl = sectionItem.image;
             const parentSectionId = sectionItem.section;
-            console.log(`📁 Section item found: ${sectionItem.name}, Image: ${imageUrl || 'none'}, Parent: ${parentSectionId}`);
             
             // STEP 1: Find all SubSections belonging to this section item
             const subsections = await SubSectionModel.find({ 
                 sectionItem: id 
             }).session(session);
             const subsectionIds = subsections.map(subsection => subsection._id);
-            console.log(`📑 Found ${subsections.length} subsections:`, subsectionIds);
             
             // STEP 2: Find all ContentElements for section item and its subsections
             const contentElements = await ContentElementModel.find({
@@ -431,7 +427,6 @@ class SectionItemService {
                 ]
             }).session(session);
             const contentElementIds = contentElements.map(element => element._id);
-            console.log(`🧩 Found ${contentElements.length} content elements:`, contentElementIds);
             
             // STEP 3: Delete all ContentTranslations for these elements
             const deletedTranslations = await ContentTranslationModel.deleteMany({
@@ -440,7 +435,6 @@ class SectionItemService {
                     { elementId: { $in: contentElementIds } } // Handle both field names
                 ]
             }).session(session);
-            console.log(`🌐 Deleted ${deletedTranslations.deletedCount} content translations`);
             
             // STEP 4: Delete all ContentElements
             const deletedElements = await ContentElementModel.deleteMany({
@@ -454,13 +448,11 @@ class SectionItemService {
                     { parentType: 'subsection', parentId: { $in: subsectionIds } }
                 ]
             }).session(session);
-            console.log(`🧩 Deleted ${deletedElements.deletedCount} content elements`);
             
             // STEP 5: Delete all SubSections
             const deletedSubsections = await SubSectionModel.deleteMany({
                 sectionItem: id
             }).session(session);
-            console.log(`📑 Deleted ${deletedSubsections.deletedCount} subsections`);
             
             // STEP 6: Remove this section item from parent section's sectionItems array
             if (parentSectionId) {
@@ -468,16 +460,13 @@ class SectionItemService {
                     parentSectionId,
                     { $pull: { sectionItems: id } }
                 ).session(session);
-                console.log(`🔗 Removed section item reference from parent section: ${parentSectionId}`);
             }
             
             // STEP 7: Finally, delete the section item itself
             const deletedSectionItem = await SectionItemModel.findByIdAndDelete(id).session(session);
-            console.log(`🗑️ Deleted section item: ${deletedSectionItem?.name}`);
             
             // Commit the transaction
             await session.commitTransaction();
-            console.log(`✅ Successfully deleted section item ${id} and all related data`);
             
             // STEP 8: Delete the image from Cloudinary if it exists (after transaction is committed)
             if (imageUrl) {
@@ -485,7 +474,6 @@ class SectionItemService {
                     const cloudinaryService = require('../services/cloudinary.service').default;
                     const publicId = cloudinaryService.getPublicIdFromUrl(imageUrl);
                     if (publicId) {
-                        console.log(`🖼️ Deleting image from Cloudinary: ${publicId}`);
                         // Delete in the background, don't wait for it
                         cloudinaryService.deleteImage(publicId).catch((err: any) => {
                             console.error('Failed to delete section item image:', err);

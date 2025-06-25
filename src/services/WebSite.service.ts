@@ -182,7 +182,6 @@ export class WebSiteService {
         session.startTransaction();
         
         try {
-            console.log(`🗑️ Starting cascade deletion for website: ${id}`);
             
             // Get the website with its logo
             const website = await WebSiteModel.findById(id).session(session);
@@ -196,12 +195,10 @@ export class WebSiteService {
                 imagesToDelete.push(website.logo);
             }
             
-            console.log(`📁 Website found: ${website.name}, Logo: ${website.logo || 'none'}`);
             
             // STEP 1: Find all Sections belonging to this website
             const sections = await SectionModel.find({ WebSiteId: id }).session(session);
             const sectionIds = sections.map(section => section._id);
-            console.log(`📂 Found ${sections.length} sections:`, sectionIds);
             
             // Collect section images
             sections.forEach(section => {
@@ -218,7 +215,6 @@ export class WebSiteService {
                 ]
             }).session(session);
             const sectionItemIds = sectionItems.map(item => item._id);
-            console.log(`📦 Found ${sectionItems.length} section items:`, sectionItemIds);
             
             // Collect section item images
             sectionItems.forEach(item => {
@@ -236,7 +232,6 @@ export class WebSiteService {
                 ]
             }).session(session);
             const subsectionIds = subsections.map(subsection => subsection._id);
-            console.log(`📑 Found ${subsections.length} subsections:`, subsectionIds);
             
             // STEP 4: Find all ContentElements for website, sections, section items, and subsections
             const contentElements = await ContentElementModel.find({
@@ -257,7 +252,6 @@ export class WebSiteService {
                 ]
             }).session(session);
             const contentElementIds = contentElements.map(element => element._id);
-            console.log(`🧩 Found ${contentElements.length} content elements:`, contentElementIds);
             
             // Collect content element images
             contentElements.forEach(element => {
@@ -273,7 +267,6 @@ export class WebSiteService {
                     { elementId: { $in: contentElementIds } } // Handle both field names
                 ]
             }).session(session);
-            console.log(`🌐 Deleted ${deletedTranslations.deletedCount} content translations`);
             
             // STEP 6: Delete all ContentElements
             const deletedElements = await ContentElementModel.deleteMany({
@@ -288,7 +281,6 @@ export class WebSiteService {
                     { parentType: 'subsection', parentId: { $in: subsectionIds } }
                 ]
             }).session(session);
-            console.log(`🧩 Deleted ${deletedElements.deletedCount} content elements`);
             
             // STEP 7: Delete all SubSections
             const deletedSubsections = await SubSectionModel.deleteMany({
@@ -298,7 +290,6 @@ export class WebSiteService {
                     { sectionItem: { $in: sectionItemIds } }
                 ]
             }).session(session);
-            console.log(`📑 Deleted ${deletedSubsections.deletedCount} subsections`);
             
             // STEP 8: Delete all SectionItems
             const deletedSectionItems = await SectionItemModel.deleteMany({
@@ -307,32 +298,26 @@ export class WebSiteService {
                     { section: { $in: sectionIds } }
                 ]
             }).session(session);
-            console.log(`📦 Deleted ${deletedSectionItems.deletedCount} section items`);
             
             // STEP 9: Delete all Sections
             const deletedSections = await SectionModel.deleteMany({
                 WebSiteId: id
             }).session(session);
-            console.log(`📂 Deleted ${deletedSections.deletedCount} sections`);
             
             // STEP 10: Delete all WebSiteUser associations
             const deletedWebsiteUsers = await WebSiteUserModel.deleteMany({
                 webSiteId: id
             }).session(session);
-            console.log(`👥 Deleted ${deletedWebsiteUsers.deletedCount} website user associations`);
             
             // STEP 11: Finally, delete the website itself
             const deletedWebsite = await WebSiteModel.findByIdAndDelete(id).session(session);
-            console.log(`🗑️ Deleted website: ${deletedWebsite?.name}`);
             
             // Commit the transaction
             await session.commitTransaction();
-            console.log(`✅ Successfully deleted website ${id} and all related data`);
             
             // STEP 12: Delete all images from Cloudinary (after transaction is committed)
             let imagesDeleted = 0;
             if (imagesToDelete.length > 0) {
-                console.log(`🖼️ Deleting ${imagesToDelete.length} images from Cloudinary`);
                 
                 for (const imageUrl of imagesToDelete) {
                     try {
@@ -340,7 +325,6 @@ export class WebSiteService {
                         if (publicId) {
                             await cloudinaryService.deleteImage(publicId);
                             imagesDeleted++;
-                            console.log(`🖼️ Deleted image: ${publicId}`);
                         }
                     } catch (imageError) {
                         console.error(`Failed to delete image ${imageUrl}:`, imageError);

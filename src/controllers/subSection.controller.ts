@@ -172,8 +172,6 @@ class SubSectionController {
    */
   getCompleteSubSectionById = asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const populateSectionItem = req.query.populate !== 'false';
-            console.log("getCompleteSubSectionById" ,  req.params.id, )
-
     const subsection = await subSectionService.getCompleteSubSectionById(
       req.params.id, 
       populateSectionItem
@@ -388,7 +386,6 @@ class SubSectionController {
      */
     getSubSectionsBySectionItemIds = asyncHandler(async (req: Request, res: Response): Promise<void> => {
         const { sectionItemIds } = req.body;
-        console.log('sectionItemIds:', sectionItemIds);
         const activeOnly = req.query.activeOnly !== 'false';
         const limit = parseInt(req.query.limit as string) || 100;
         const skip = parseInt(req.query.skip as string) || 0;

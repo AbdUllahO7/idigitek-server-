@@ -30,7 +30,6 @@ async createSection(sectionData: {
     order?: number;
     WebSiteId: Schema.Types.ObjectId,
   }) {
-    console.log('Creating section with multilingual data:', sectionData);
     
     try {
       // Validate multilingual names
@@ -254,7 +253,6 @@ getSectionDescriptionByLanguage(section: any, language: 'en' | 'ar' | 'tr' = 'en
     session.startTransaction();
 
     try {
-      console.log(`🗑️ Starting cascade deletion for section: ${id}`);
       
       // Get the section with its image
       const section = await SectionModel.findById(id).session(session);
@@ -264,12 +262,10 @@ getSectionDescriptionByLanguage(section: any, language: 'en' | 'ar' | 'tr' = 'en
       
       // Store the image URL for later deletion if it exists
       const imageUrl = section.image;
-      console.log(`📁 Section found: ${section.name}, Image: ${imageUrl || 'none'}`);
       
       // STEP 1: Find all SectionItems belonging to this section
       const sectionItems = await SectionItemModel.find({ section: id }).session(session);
       const sectionItemIds = sectionItems.map(item => item._id);
-      console.log(`📦 Found ${sectionItems.length} section items:`, sectionItemIds);
       
       // STEP 2: Find all SubSections belonging to this section (both direct and through section items)
       const subsections = await SubSectionModel.find({
@@ -279,7 +275,6 @@ getSectionDescriptionByLanguage(section: any, language: 'en' | 'ar' | 'tr' = 'en
         ]
       }).session(session);
       const subsectionIds = subsections.map(subsection => subsection._id);
-      console.log(`📑 Found ${subsections.length} subsections:`, subsectionIds);
       
       // STEP 3: Find all ContentElements for section, section items, and subsections
       const contentElements = await ContentElementModel.find({
@@ -297,7 +292,6 @@ getSectionDescriptionByLanguage(section: any, language: 'en' | 'ar' | 'tr' = 'en
         ]
       }).session(session);
       const contentElementIds = contentElements.map(element => element._id);
-      console.log(`🧩 Found ${contentElements.length} content elements:`, contentElementIds);
       
       // STEP 4: Delete all ContentTranslations for these elements
       const deletedTranslations = await ContentTranslationModel.deleteMany({
@@ -306,7 +300,6 @@ getSectionDescriptionByLanguage(section: any, language: 'en' | 'ar' | 'tr' = 'en
           { elementId: { $in: contentElementIds } } // Handle both field names
         ]
       }).session(session);
-      console.log(`🌐 Deleted ${deletedTranslations.deletedCount} content translations`);
       
       // STEP 5: Delete all ContentElements
       const deletedElements = await ContentElementModel.deleteMany({
@@ -323,7 +316,6 @@ getSectionDescriptionByLanguage(section: any, language: 'en' | 'ar' | 'tr' = 'en
           { parentType: 'subsection', parentId: { $in: subsectionIds } }
         ]
       }).session(session);
-      console.log(`🧩 Deleted ${deletedElements.deletedCount} content elements`);
       
       // STEP 6: Delete all SubSections
       const deletedSubsections = await SubSectionModel.deleteMany({
@@ -332,21 +324,17 @@ getSectionDescriptionByLanguage(section: any, language: 'en' | 'ar' | 'tr' = 'en
           { sectionItem: { $in: sectionItemIds } }
         ]
       }).session(session);
-      console.log(`📑 Deleted ${deletedSubsections.deletedCount} subsections`);
       
       // STEP 7: Delete all SectionItems
       const deletedSectionItems = await SectionItemModel.deleteMany({ 
         section: id 
       }).session(session);
-      console.log(`📦 Deleted ${deletedSectionItems.deletedCount} section items`);
       
       // STEP 8: Finally, delete the section itself
       const deletedSection = await SectionModel.findByIdAndDelete(id).session(session);
-      console.log(`🗑️ Deleted section: ${deletedSection?.name}`);
       
       // Commit the transaction
       await session.commitTransaction();
-      console.log(`✅ Successfully deleted section ${id} and all related data`);
       
       // STEP 9: Delete the image from Cloudinary if it exists (after transaction is committed)
       if (imageUrl) {
@@ -354,7 +342,6 @@ getSectionDescriptionByLanguage(section: any, language: 'en' | 'ar' | 'tr' = 'en
           const cloudinaryService = require('../services/cloudinary.service').default;
           const publicId = cloudinaryService.getPublicIdFromUrl(imageUrl);
           if (publicId) {
-            console.log(`🖼️ Deleting image from Cloudinary: ${publicId}`);
             // Delete in the background, don't wait for it
             cloudinaryService.deleteImage(publicId).catch((err: any) => {
               console.error('Failed to delete section image:', err);
@@ -388,15 +375,12 @@ getSectionDescriptionByLanguage(section: any, language: 'en' | 'ar' | 'tr' = 'en
   // Helper method to verify deletion was complete
   async verifyDeletionComplete(sectionId: string) {
     try {
-      console.log(`🔍 Verifying deletion for section: ${sectionId}`);
       
       // Check if section still exists
       const section = await SectionModel.findById(sectionId);
-      console.log(`Section exists: ${!!section}`);
       
       // Check for orphaned section items
       const orphanedSectionItems = await SectionItemModel.find({ section: sectionId });
-      console.log(`Orphaned section items: ${orphanedSectionItems.length}`);
       
       // Check for orphaned subsections
       const orphanedSubsections = await SubSectionModel.find({ 
@@ -405,7 +389,6 @@ getSectionDescriptionByLanguage(section: any, language: 'en' | 'ar' | 'tr' = 'en
           { sectionItem: { $in: orphanedSectionItems.map(item => item._id) } }
         ]
       });
-      console.log(`Orphaned subsections: ${orphanedSubsections.length}`);
       
       // Check for orphaned content elements
       const orphanedElements = await ContentElementModel.find({
@@ -414,7 +397,6 @@ getSectionDescriptionByLanguage(section: any, language: 'en' | 'ar' | 'tr' = 'en
           { parentType: 'section', parentId: sectionId }
         ]
       });
-      console.log(`Orphaned content elements: ${orphanedElements.length}`);
       
       const isComplete = !section && 
                         orphanedSectionItems.length === 0 && 

@@ -14,7 +14,6 @@ class ClientSubSectionController {
     if (!id) {
       throw AppError.validation('Section ID is required');
     }
-    console.log("req.params.id", id);
     const activeOnly = req.query.activeOnly !== 'false';
     const limit = parseInt(req.query.limit as string) || 100;
     const skip = parseInt(req.query.skip as string) || 0;
@@ -38,7 +37,6 @@ class ClientSubSectionController {
     if (!sectionId) {
       throw AppError.validation('Section ID is required');
     }
-    console.log("req.params.sectionId", sectionId);
     const mainSubsection = await clientSubSectionService.getMainSubSectionBySectionId(sectionId);
 
     if (!mainSubsection) {
@@ -58,7 +56,6 @@ class ClientSubSectionController {
     if (!sectionItemId) {
       throw AppError.validation('Section Item ID is required');
     }
-    console.log("req.params.sectionItemId", sectionItemId);
     const activeOnly = req.query.activeOnly !== 'false';
     const limit = parseInt(req.query.limit as string) || 100;
     const skip = parseInt(req.query.skip as string) || 0;
@@ -84,7 +81,6 @@ class ClientSubSectionController {
     if (!websiteId) {
       throw AppError.validation('Website ID is required');
     }
-    console.log("req.params.websiteId", websiteId);
     const mainSubsection = await clientSubSectionService.getMainSubSectionByWebSiteId(websiteId);
 
     if (!mainSubsection) {
