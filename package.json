@@ -1,7 +1,7 @@
 {
   "name": "secure-express-ts-api",
   "version": "1.0.0",
-  "description": "Secure Express.js API with MongoDB and TypeScript",
+  "description": "Secure Express.js API with MongoDB, TypeScript and Microservices Architecture",
   "main": "src/server.ts",
   "engines": {
     "node": "18.x"
@@ -11,38 +11,77 @@
     "dev": "nodemon --exec ts-node --transpile-only src/server.ts",
     "build": "tsc",
     "vercel-build": "echo 'Vercel deployment - using direct TypeScript compilation'",
+    "dev:micro": "concurrently \"npm run dev:gateway\" \"npm run dev:auth\" \"npm run dev:content\" \"npm run dev:website\" \"npm run dev:user\"",
+    "dev:gateway": "cross-env PORT=4000 nodemon --exec ts-node --transpile-only src/gateway/server.ts",
+    "dev:auth": "cross-env PORT=4001 nodemon --exec ts-node --transpile-only src/services/auth/auth.service.app.ts",
+    "dev:content": "cross-env PORT=4002 nodemon --exec ts-node --transpile-only src/services/content/content.service.app.ts",
+    "dev:website": "cross-env PORT=4003 nodemon --exec ts-node --transpile-only src/services/website/website.service.app.ts",
+    "dev:user": "cross-env PORT=4004 nodemon --exec ts-node --transpile-only src/services/user/user.service.app.ts",
+    "start:micro": "concurrently \"npm run start:gateway\" \"npm run start:auth\" \"npm run start:content\" \"npm run start:website\" \"npm run start:user\"",
+    "start:gateway": "cross-env PORT=4000 node dist/gateway/server.js",
+    "start:auth": "cross-env PORT=4001 node dist/services/auth/auth.service.app.js",
+    "start:content": "cross-env PORT=4002 node dist/services/content/content.service.app.js",
+    "start:website": "cross-env PORT=4003 node dist/services/website/website.service.app.js",
+    "start:user": "cross-env PORT=4004 node dist/services/user/user.service.app.js",
+    "docker:build": "docker-compose build",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f",
+    "docker:clean": "docker-compose down -v --remove-orphans",
+    "docker:rebuild": "npm run docker:clean && npm run docker:build && npm run docker:up",
+    "services:start": "chmod +x scripts/start-microservices.sh && ./scripts/start-microservices.sh",
+    "services:stop": "chmod +x scripts/stop-microservices.sh && ./scripts/stop-microservices.sh",
+    "services:restart": "npm run services:stop && npm run services:start",
+    "services:status": "node scripts/check-services.js",
     "lint": "eslint . --ext .ts",
     "format": "prettier --write \"src/**/*.ts\"",
     "test": "jest",
-     "security:audit": "npm audit --audit-level moderate",
+    "security:audit": "npm audit --audit-level moderate",
     "security:fix": "npm audit fix",
     "security:check": "npm outdated",
     "security:update": "npm update",
-    "test:security": "npm run security:audit && npm run security:check"
+    "test:security": "npm run security:audit && npm run security:check && node scripts/security-tests.js",
+    "test:penetration": "node scripts/security-tests.js",
+    "test:load": "node scripts/load-tests.js",
+    "test:all": "npm run test && npm run test:security",
+    "health:check": "node scripts/health-check.js",
+    "metrics:collect": "node scripts/collect-metrics.js",
+    "logs:collect": "node scripts/collect-logs.js",
+    "db:seed": "ts-node scripts/seed-database.ts",
+    "db:backup": "node scripts/backup-database.js",
+    "setup:admin": "ts-node src/scripts/insertAdmin.ts",
+    "setup:env": "node scripts/setup-environment.js"
   },
   "keywords": [
     "express",
     "typescript",
     "mongodb",
     "api",
-    "security"
+    "security",
+    "microservices",
+    "gateway",
+    "authentication",
+    "rate-limiting"
   ],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@types/http-proxy-middleware": "^0.19.3",
     "bcryptjs": "^2.4.3",
     "cloudinary": "^1.41.3",
     "compression": "^1.7.4",
-     "express-slow-down": "^1.6.0",
-    "ua-parser-js": "^1.0.37",
     "cors": "^2.8.5",
+    "crypto": "^1.0.1",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "express-mongo-sanitize": "^2.2.0",
     "express-rate-limit": "^7.5.0",
+    "express-slow-down": "^1.6.0",
     "express-validator": "^7.2.1",
     "fs-extra": "^11.3.0",
     "helmet": "^7.1.0",
+    "http-proxy-middleware": "^2.0.9",
+    "ioredis": "^5.3.2",
     "joi": "^17.13.3",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.0.3",
@@ -51,12 +90,12 @@
     "multer-storage-cloudinary": "^4.0.0",
     "ts-node": "^10.9.1",
     "typescript": "^5.3.3",
+    "ua-parser-js": "^1.0.37",
     "uuid": "^11.1.0",
     "winston": "^3.11.0",
     "xss-clean": "^0.1.4"
   },
   "devDependencies": {
-    "@types/ua-parser-js": "^0.7.36",
     "@types/bcryptjs": "^2.4.6",
     "@types/compression": "^1.7.5",
     "@types/cors": "^2.8.17",
@@ -64,13 +103,72 @@
     "@types/jest": "^29.5.11",
     "@types/jsonwebtoken": "^9.0.5",
     "@types/morgan": "^1.9.9",
+    "@types/multer": "^1.4.11",
     "@types/node": "^20.10.4",
+    "@types/ua-parser-js": "^0.7.36",
     "@typescript-eslint/eslint-plugin": "^6.13.2",
     "@typescript-eslint/parser": "^6.13.2",
+    "autocannon": "^7.15.0",
+    "axios": "^1.6.2",
+    "concurrently": "^7.6.0",
+    "cross-env": "^7.0.3",
     "eslint": "^8.55.0",
     "jest": "^29.7.0",
     "nodemon": "^3.0.2",
     "prettier": "^3.1.0",
     "ts-jest": "^29.1.1"
-  }
+  },
+  "nodemonConfig": {
+    "watch": [
+      "src"
+    ],
+    "ext": "ts,js,json",
+    "ignore": [
+      "src/**/*.test.ts",
+      "src/**/*.spec.ts"
+    ],
+    "env": {
+      "NODE_ENV": "development"
+    }
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "roots": [
+      "<rootDir>/src"
+    ],
+    "testMatch": [
+      "**/__tests__/**/*.ts",
+      "**/?(*.)+(spec|test).ts"
+    ],
+    "collectCoverageFrom": [
+      "src/**/*.ts",
+      "!src/**/*.d.ts",
+      "!src/types/**",
+      "!src/**/*.test.ts"
+    ]
+  },
+  "eslintConfig": {
+    "parser": "@typescript-eslint/parser",
+    "plugins": [
+      "@typescript-eslint"
+    ],
+    "extends": [
+      "eslint:recommended",
+      "@typescript-eslint/recommended"
+    ],
+    "rules": {
+      "@typescript-eslint/no-unused-vars": "error",
+      "@typescript-eslint/no-explicit-any": "warn",
+      "no-console": "warn"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "your-repo-url"
+  },
+  "bugs": {
+    "url": "your-repo-url/issues"
+  },
+  "homepage": "your-repo-url#readme"
 }
