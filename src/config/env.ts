@@ -9,7 +9,7 @@ const isVercel = !!process.env.VERCEL;
 export const env = {
   // Server settings
   nodeEnv: process.env.NODE_ENV || 'development',
-  port: parseInt(process.env.PORT || '6000', 10),
+  port: parseInt(process.env.PORT || '8000', 10),
   apiVersion: process.env.API_VERSION || 'v1',
   
   // MongoDB settings
