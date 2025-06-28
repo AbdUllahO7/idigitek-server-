@@ -897,6 +897,71 @@ getSectionDescriptionByLanguage(section: any, language: 'en' | 'ar' | 'tr' = 'en
 
     throw new Error('Unexpected error: Retry loop exited without resolution');
   }
+  /**
+ * Get basic section information (id, name, subName) for lightweight operations
+ * @param query Optional filter query
+ * @param websiteId Optional website ID to filter by specific website
+ * @returns Array of sections with only id, name, and subName
+ */
+async getBasicSectionInfo(query: any = {}, websiteId?: string) {
+  try {
+    // Build the query
+    const finalQuery: any = { ...query };
+    
+    // Add website filter if provided
+    if (websiteId) {
+      finalQuery.WebSiteId = websiteId;
+    }
+    
+    // Only select the fields we need for better performance
+    const sections = await SectionModel.find(finalQuery)
+      .select('_id name subName')  // Only select id, name, and subName
+      .sort({ order: 1 })
+      .lean(); // Use lean() for better performance since we don't need mongoose document methods
+    
+    // Transform the data to have a cleaner structure
+    const basicSectionInfo = sections.map(section => ({
+      id: section._id,
+      name: {
+        en: section.name.en,
+        ar: section.name.ar,
+        tr: section.name.tr
+      },
+      subName: section.subName
+    }));
+    
+    return basicSectionInfo;
+  } catch (error) {
+    console.error('Error fetching basic section info:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get basic section information for a specific website
+ * @param websiteId The ID of the website
+ * @param includeInactive Whether to include inactive sections (default: false)
+ * @returns Array of sections with only id, name, and subName for the specified website
+ */
+async getBasicSectionInfoByWebsite(websiteId: string, includeInactive: boolean = false) {
+  try {
+    if (!websiteId) {
+      throw new Error('Website ID is required');
+    }
+
+    const query: any = { WebSiteId: websiteId };
+    
+    // Filter by active status if requested
+    if (!includeInactive) {
+      query.isActive = true;
+    }
+    
+    return await this.getBasicSectionInfo(query);
+  } catch (error) {
+    console.error('Error fetching basic section info by website:', error);
+    throw error;
+  }
+}
 }
 
 

@@ -406,4 +406,55 @@ export class SectionController {
 
     return sendSuccess(res, updatedSections, 'Section order updated successfully');
   });
+  /**
+ * Get basic section information (id, name, subName) for lightweight operations
+ * @route GET /api/sections/basic
+ */
+getBasicSectionInfo = asyncHandler(async (req: Request, res: Response) => {
+  const { isActive, websiteId } = req.query;
+  
+  // Build query based on request parameters
+  const query: any = {};
+  
+  if (isActive !== undefined) {
+    query.isActive = isActive === 'true';
+  }
+  
+  const sections = await this.sectionService.getBasicSectionInfo(
+    query, 
+    websiteId as string | undefined
+  );
+  
+  return res.status(200).json({
+    success: true,
+    count: sections.length,
+    data: sections
+  });
+});
+
+/**
+ * Get basic section information for a specific website
+ * @route GET /api/sections/basic/website/:websiteId
+ */
+getBasicSectionInfoByWebsite = asyncHandler(async (req: Request, res: Response) => {
+  const { websiteId } = req.params;
+  const { includeInactive } = req.query;
+  
+  if (!websiteId) {
+    throw AppError.badRequest('Website ID is required');
+  }
+  
+  const showInactive = includeInactive === 'true';
+  
+  const sections = await this.sectionService.getBasicSectionInfoByWebsite(
+    websiteId, 
+    showInactive
+  );
+  
+  return res.status(200).json({
+    success: true,
+    count: sections.length,
+    data: sections
+  });
+});
 }
