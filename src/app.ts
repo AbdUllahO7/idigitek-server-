@@ -21,12 +21,7 @@ import contentTranslationRoutes from './routes/contentTranslation.routes';
 import sectionsItemsRoutes from './routes/sectionItem.routes';
 import webSiteRoutes from './routes/webSite.routes'
 import webSiteThem from './routes/webSiteTheme.route'
-
 import contactForm from './routes/contact.routes'
-
-
-
-
 
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.middleware';
 
@@ -38,14 +33,23 @@ app.use(requestIdMiddleware);
 // Set security HTTP headers
 app.use(helmet());
 
-// Parse JSON request body
-app.use(express.json({ limit: '10kb' }));
+// FIXED: Body parsing middleware with proper limits (ONLY ONCE!)
+app.use(express.json({ 
+  limit: '50mb',
+  strict: false, // Allow parsing of non-objects/arrays
+  type: ['application/json', 'text/plain'], // Parse these content types as JSON
+  verify: (req: any, res, buf) => {
+    if (buf.length > 1024 * 1024) {
+      console.log(`Large request received: ${buf.length} bytes to ${req.path}`);
+    }
+  }
+}));
 
-// Increase the payload size limit (example: 5MB)
-app.use(express.json({ limit: '5mb' }));
-app.use(express.urlencoded({ limit: '5mb', extended: true }));
-
-
+app.use(express.urlencoded({ 
+  extended: true,
+  limit: '50mb',  // Increased limit for large form data
+  parameterLimit: 100000
+}));
 
 // Sanitize request data (prevent NoSQL injection & XSS)
 app.use(xss());
@@ -72,14 +76,27 @@ if (env.nodeEnv === 'development') {
   app.use(morgan('dev'));
 }
 
-// Before security middleware
-app.use(express.json({ limit: '50mb' })); // Increased from 10kb
-app.use(express.urlencoded({ 
-  extended: true,
-  limit: '50mb' // Increased from 10kb
-}));
-
 app.use(requestLogger);
+
+// Error handling middleware for payload too large
+app.use((error: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (error.type === 'entity.too.large') {
+    return res.status(413).json({
+      success: false,
+      message: 'Request payload too large. Please reduce the content size.',
+      maxSize: '50MB'
+    });
+  }
+  
+  if (error.type === 'entity.parse.failed') {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid JSON format in request body.'
+    });
+  }
+
+  next(error);
+});
 
 // API Routes
 const apiVersion = env.apiVersion;
@@ -95,9 +112,6 @@ app.use(`/api/${apiVersion}/websites`, webSiteRoutes);
 app.use(`/api/${apiVersion}/websites`, webSiteRoutes);
 app.use(`/api/${apiVersion}/themes`, webSiteThem);
 app.use(`/api/${apiVersion}/contactForm`,  contactForm);
-
-
-
 
 // Health check route
 app.get('/health', (req, res) => {
