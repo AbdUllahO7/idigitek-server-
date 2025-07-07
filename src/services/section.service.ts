@@ -716,16 +716,15 @@ getSectionDescriptionByLanguage(section: any, language: 'en' | 'ar' | 'tr' = 'en
    * @param includeInactive Whether to include inactive sections (default: false)
    * @returns Array of sections belonging to the website
    */
-  async getSectionsByWebsiteId(websiteId: Schema.Types.ObjectId | string, includeInactive: boolean = false) {
+  async getSectionsByWebsiteId(websiteId: Schema.Types.ObjectId | string, includeInactive: boolean) {
     try {
+      console.log()
       if (!websiteId) {
         throw new Error('Website ID is required');
       }
 
       const query: any = { WebSiteId: websiteId };
-      if (!includeInactive) {
-        query.isActive = true;
-      }
+  
       
       const sections = await SectionModel.find(query).sort({ order: 1 });
       return sections;
