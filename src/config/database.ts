@@ -2,39 +2,43 @@ import mongoose from 'mongoose';
 import { env } from './env';
 import logger from './logger';
 
-/**
- * Connect to MongoDB
- */
 export const connectDatabase = async (): Promise<void> => {
   try {
-    const uri = env.nodeEnv === 'test' ? env.mongodb.uriTest : env.mongodb.uri;
+    const options: mongoose.ConnectOptions = {
+      maxPoolSize: 100, // Increased connection pool
+      minPoolSize: 5,
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+      maxIdleTimeMS: 30000,
+      
+      // Performance optimizations
+      readPreference: 'primary',
+      writeConcern: { w: 'majority', j: true },
+      readConcern: { level: 'majority' },
+      
+      // Connection optimization
+      compressors: ['zlib'],
+      zlibCompressionLevel: 6,
+    };
+
+    await mongoose.connect(env.mongodb.uriTest, options);
     
-    await mongoose.connect(uri);
-    
-    logger.info('MongoDB connection established successfully');
-    
-    // Handle MongoDB connection events
-    mongoose.connection.on('error', (err) => {
-      logger.error(`MongoDB connection error: ${err}`);
-    });
-    
-    mongoose.connection.on('disconnected', () => {
-      logger.warn('MongoDB disconnected');
-    });
-    
-    // Handle application termination
-    process.on('SIGINT', async () => {
-      await mongoose.connection.close();
-      logger.info('MongoDB connection closed due to application termination');
-      process.exit(0);
-    });
-    
+    // Enable query performance monitoring in development
+    if (env.nodeEnv === 'development') {
+      mongoose.set('debug', (collection, method, query, doc) => {
+        logger.info(`MongoDB Query: ${collection}.${method}`, {
+          query: JSON.stringify(query),
+          doc: doc ? JSON.stringify(doc) : undefined
+        });
+      });
+    }
+
+    logger.info('Database connected successfully');
   } catch (error) {
-    logger.error(`MongoDB connection error: ${error}`);
-    process.exit(1);
+    logger.error('Database connection error:', error);
+    throw error;
   }
 };
-
 /**
  * Disconnect from MongoDB
  */
@@ -46,3 +50,4 @@ export const disconnectDatabase = async (): Promise<void> => {
     logger.error(`Error while closing MongoDB connection: ${error}`);
   }
 };
+
