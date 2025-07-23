@@ -6,6 +6,7 @@ import { IService, IServiceDocument } from '../types/sectionItem.types';
 import { AppError } from '../middleware/errorHandler.middleware';
 import ContentElementModel from '../models/ContentElement.model';
 import ContentTranslationModel from '../models/ContentTranslation.model';
+import cacheService from './cache.service';
 
 class SectionItemService {
     /**
@@ -64,53 +65,81 @@ class SectionItemService {
      * @param includeSubSectionCount Whether to include subsection count
      * @returns Promise with array of section items
      */
-    async getAllSectionItems(
-        activeOnly = true, 
-        limit = 100, 
-        skip = 0,
-        includeSubSectionCount = false
-    ): Promise<IServiceDocument[]> {
-        try {
-            const query = activeOnly ? { isActive: true } : {};
-            
-            const sectionItems = await SectionItemModel.find(query)
-                .sort({ order: 1, createdAt: -1 })
-                .skip(skip)
-                .limit(limit)
-                .populate({
-                    path: 'section',
-                    match: activeOnly ? { isActive: true } : {},
-                    options: { sort: { order: 1 } }
-                });
-            
-            // If requested, get subsection count for each section item
-            if (includeSubSectionCount && sectionItems.length > 0) {
-                const sectionItemIds = sectionItems.map(item => item._id);
-                
-                // Get counts for each section item
-                const subsectionCounts = await SubSectionModel.aggregate([
-                    { $match: { sectionItem: { $in: sectionItemIds }, isActive: activeOnly } },
-                    { $group: { _id: '$sectionItem', count: { $sum: 1 } } }
-                ]);
-                
-                // Create a map of section item ID to count
-                const countsMap = subsectionCounts.reduce((acc, item) => {
-                    acc[item._id.toString()] = item.count;
-                    return acc;
-                }, {} as { [key: string]: number });
-                
-                // Add count to each section item
-                sectionItems.forEach(sectionItem => {
-                    const id = sectionItem._id.toString();
-                    (sectionItem as any).subsectionCount = countsMap[id] || 0;
-                });
-            }
-            
-            return sectionItems;
-        } catch (error) {
-            throw AppError.database('Failed to retrieve section items', error);
+   async getAllSectionItems(
+    activeOnly = true,
+    limit = 100,
+    skip = 0,
+    includeSubSectionCount = false
+): Promise<any[]> {
+    try {
+        // Check cache first
+        const cacheKey = `all_sectionitems_${activeOnly}_${limit}_${skip}_${includeSubSectionCount}`;
+        const cached = await cacheService.get(cacheKey);
+        if (cached) {
+            return cached;
         }
+
+        const query = activeOnly ? { isActive: true } : {};
+        
+        // Use lean() for better performance
+        const sectionItems = await SectionItemModel.find(query, {
+            // Project only needed fields
+            name: 1,
+            description: 1,
+            image: 1,
+            isActive: 1,
+            order: 1,
+            isMain: 1,
+            WebSiteId: 1,
+            section: 1,
+            subsections: 1,
+            createdAt: 1,
+            updatedAt: 1
+        })
+        .sort({ order: 1, createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate({
+            path: 'section',
+            match: activeOnly ? { isActive: true } : {},
+            select: 'name subName isActive order',
+            options: { sort: { order: 1 } }
+        })
+        .lean();
+
+        // Add subsection count if requested
+        if (includeSubSectionCount && sectionItems.length > 0) {
+            const sectionItemIds = sectionItems.map(item => item._id);
+            
+            const subsectionCounts = await SubSectionModel.aggregate([
+                { 
+                    $match: { 
+                        sectionItem: { $in: sectionItemIds },
+                        ...(activeOnly && { isActive: true })
+                    }
+                },
+                { $group: { _id: '$sectionItem', count: { $sum: 1 } } }
+            ]);
+            
+            const countsMap = subsectionCounts.reduce((acc, item) => {
+                acc[item._id.toString()] = item.count;
+                return acc;
+            }, {} as { [key: string]: number });
+            
+            sectionItems.forEach(sectionItem => {
+                sectionItem.subsectionCount = countsMap[sectionItem._id.toString()] || 0;
+            });
+        }
+        
+        // Cache for 2 minutes
+        await cacheService.set(cacheKey, sectionItems, { ttl: 120 });
+        
+        return sectionItems;
+    } catch (error) {
+        throw AppError.database('Failed to retrieve section items', error);
     }
+}
+
     
     /**
      * Get section item by ID
@@ -119,45 +148,71 @@ class SectionItemService {
      * @param includeSubSections Whether to include subsections
      * @returns Promise with the section item if found
      */
-    async getSectionItemById(
-        id: string, 
-        populateSection = true,
-        includeSubSections = false
-    ): Promise<IServiceDocument> {
-        try {
-            if (!mongoose.Types.ObjectId.isValid(id)) {
-                throw AppError.validation('Invalid section item ID format');
-            }
-
-            const query = SectionItemModel.findById(id);
-            
-            if (populateSection) {
-                query.populate('section');
-            }
-            
-            const sectionItem = await query.exec();
-            
-            if (!sectionItem) {
-                throw AppError.notFound(`Section item with ID ${id} not found`);
-            }
-            
-            // If requested, include subsections
-            if (includeSubSections) {
-                const subsections = await SubSectionModel.find({
-                    sectionItem: id,
-                    isActive: true
-                }).sort({ order: 1 });
-                
-                // Add subsections to the result
-                (sectionItem as any).subsections = subsections;
-            }
-            
-            return sectionItem;
-        } catch (error) {
-            if (error instanceof AppError) throw error;
-            throw AppError.database('Failed to retrieve section item', error);
+async getSectionItemById(
+    id: string,
+    populateSection = true,
+    includeSubSections = false
+): Promise<any> {
+    try {
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            throw AppError.validation('Invalid section item ID format');
         }
+
+        // Check cache first
+        const cacheKey = `sectionitem_${id}_${populateSection}_${includeSubSections}`;
+        const cached = await cacheService.get(cacheKey);
+        if (cached) {
+            return cached;
+        }
+
+        const pipeline = [
+            { $match: { _id: new mongoose.Types.ObjectId(id) } },
+            
+            // Conditionally lookup section
+            ...(populateSection ? [{
+                $lookup: {
+                    from: 'sections',
+                    localField: 'section',
+                    foreignField: '_id',
+                    as: 'section'
+                }
+            }, {
+                $unwind: { path: '$section', preserveNullAndEmptyArrays: true }
+            }] : []),
+            
+            // Conditionally include subsections
+            ...(includeSubSections ? [{
+                $lookup: {
+                    from: 'subsections',
+                    localField: '_id',
+                    foreignField: 'sectionItem',
+                    as: 'subsections',
+                    pipeline: [
+                        { $match: { isActive: true } },
+                        { $sort: { order: 1 } }
+                    ]
+                }
+            }] : [])
+        ];
+
+        const result = await SectionItemModel.aggregate(pipeline);
+        
+        if (!result || result.length === 0) {
+            throw AppError.notFound(`Section item with ID ${id} not found`);
+        }
+
+        const sectionItem = result[0];
+        
+        // Cache for 5 minutes
+        await cacheService.set(cacheKey, sectionItem, { ttl: 300 });
+        
+        return sectionItem;
+    } catch (error) {
+        if (error instanceof AppError) throw error;
+        throw AppError.database('Failed to retrieve section item', error);
     }
+}
+
     
     /**
      * Get section items by parent section ID
@@ -168,86 +223,87 @@ class SectionItemService {
      * @param includeSubSectionCount Whether to include subsection count
      * @returns Promise with array of section items
      */
-   async getSectionItemsBySectionId(
-    sectionId: string,
-    activeOnly = true,
-    limit = 100,
-    skip = 0,
-    includeSubSectionCount = true
-): Promise<IServiceDocument[]> {
-    try {
-        if (!mongoose.Types.ObjectId.isValid(sectionId)) {
-            throw AppError.validation('Invalid section ID format');
-        }
-
-
-        // Build the query
-        const query: any = { 
-            section: sectionId 
-        };
-        
-        if (activeOnly) {
-            query.isActive = true;
-        }
-        
-        const sectionItems = await SectionItemModel.find(query)
-            .sort({ order: 1, createdAt: -1 })
-            .skip(skip)
-            .limit(limit)
-            .populate({
-                path: 'section',
-                match: activeOnly ? { isActive: true } : {},
-                options: { sort: { order: 1 } }
-            })
-            .populate({
-                path: 'subsections',
-                match: activeOnly ? { isActive: true } : {},
-                options: { sort: { order: 1 } }
-            });
-        
-        // If requested, get subsection count for each section item
-        if (includeSubSectionCount && sectionItems.length > 0) {
-            const sectionItemIds = sectionItems.map(item => item._id).filter(id => id);
-            
-            if (sectionItemIds.length > 0) {
-                // Get counts for each section item
-                const subsectionCounts = await SubSectionModel.aggregate([
-                    { $match: { sectionItem: { $in: sectionItemIds }, isActive: activeOnly } },
-                    { $group: { _id: '$sectionItem', count: { $sum: 1 } } }
-                ]).catch(err => {
-                    console.error('Aggregation error:', err);
-                    throw err;
-                });
-                
-                // Create a map of section item ID to count
-                const countsMap = subsectionCounts.reduce((acc, item) => {
-                    acc[item._id?.toString() ?? ''] = item.count;
-                    return acc;
-                }, {} as { [key: string]: number });
-                
-                // Add count to each section item
-                sectionItems.forEach(sectionItem => {
-                    const id = sectionItem._id?.toString() ?? '';
-                    (sectionItem as any).subsectionCount = countsMap[id] || 0;
-                });
+    async getSectionItemsBySectionId(
+        sectionId: string,
+        activeOnly = true,
+        limit = 100,
+        skip = 0,
+        includeSubSectionCount = true
+    ): Promise<any[]> {
+        try {
+            if (!mongoose.Types.ObjectId.isValid(sectionId)) {
+                throw AppError.validation('Invalid section ID format');
             }
+
+            // Check cache first
+            const cacheKey = `sectionitems_section_${sectionId}_${activeOnly}_${limit}_${skip}_${includeSubSectionCount}`;
+            const cached = await cacheService.get(cacheKey);
+            if (cached) {
+                return cached;
+            }
+
+            const matchStage: any = { section: new mongoose.Types.ObjectId(sectionId) };
+            if (activeOnly) {
+                matchStage.isActive = true;
+            }
+
+            const pipeline = [
+                { $match: matchStage },
+                { $sort: { order: 1, createdAt: -1 } },
+                { $skip: skip },
+                { $limit: limit },
+                
+                // Lookup section
+                {
+                    $lookup: {
+                        from: 'sections',
+                        localField: 'section',
+                        foreignField: '_id',
+                        as: 'section',
+                        pipeline: activeOnly ? [{ $match: { isActive: true } }] : []
+                    }
+                },
+                
+                // Lookup subsections with count
+                {
+                    $lookup: {
+                        from: 'subsections',
+                        let: { sectionItemId: '$_id' },
+                        pipeline: [
+                            {
+                                $match: {
+                                    $expr: { $eq: ['$sectionItem', '$$sectionItemId'] },
+                                    ...(activeOnly && { isActive: true })
+                                }
+                            },
+                            { $sort: { order: 1 } }
+                        ],
+                        as: 'subsections'
+                    }
+                },
+                
+                // Add subsection count if requested
+                ...(includeSubSectionCount ? [{
+                    $addFields: {
+                        subsectionCount: { $size: '$subsections' }
+                    }
+                }] : []),
+                
+                // Unwind section
+                { $unwind: { path: '$section', preserveNullAndEmptyArrays: true } }
+            ];
+
+            const result = await SectionItemModel.aggregate(pipeline);
+            
+            // Cache for 3 minutes
+            await cacheService.set(cacheKey, result, { ttl: 180 });
+            
+            return result;
+        } catch (error) {
+            if (error instanceof AppError) throw error;
+            throw AppError.database('Failed to retrieve section items by section ID', error);
         }
-        
-        return sectionItems;
-    } catch (error) {
-        console.error('Error in getSectionItemsBySectionId:', {
-            sectionId,
-            activeOnly,
-            limit,
-            skip,
-            includeSubSectionCount,
-            error: error.message,
-            stack: error.stack,
-        });
-        if (error instanceof AppError) throw error;
-        throw AppError.database('Failed to retrieve section items by section ID', error);
     }
-}
 
     /**
      * Get section items by WebSite ID
@@ -259,65 +315,84 @@ class SectionItemService {
      * @returns Promise with array of section items
      */
     async getSectionItemsByWebSiteId(
-        websiteId: string,
-        activeOnly = true,
-        limit = 100,
-        skip = 0,
-        includeSubSectionCount = false
-    ): Promise<IServiceDocument[]> {
-        try {
-            if (!mongoose.Types.ObjectId.isValid(websiteId)) {
-                throw AppError.validation('Invalid WebSite ID format');
-            }
+    websiteId: string,
+    activeOnly = true,
+    limit = 100,
+    skip = 0,
+    includeSubSectionCount = false
+): Promise<any[]> {
+    try {
+        if (!mongoose.Types.ObjectId.isValid(websiteId)) {
+            throw AppError.validation('Invalid WebSite ID format');
+        }
 
-            // Build the query
-            const query: any = { 
-                WebSiteId: websiteId 
-            };
-            
-            if (activeOnly) {
-                query.isActive = true;
-            }
-            
-            const sectionItems = await SectionItemModel.find(query)
-                .sort({ order: 1, createdAt: -1 })
-                .skip(skip)
-                .limit(limit)
-                .populate({
-                    path: 'section',
-                    match: activeOnly ? { isActive: true } : {},
-                    options: { sort: { order: 1 } }
-                });
-            
-            // If requested, get subsection count for each section item
-            if (includeSubSectionCount && sectionItems.length > 0) {
-                const sectionItemIds = sectionItems.map(item => item._id);
-                
-                // Get counts for each section item
-                const subsectionCounts = await SubSectionModel.aggregate([
-                    { $match: { sectionItem: { $in: sectionItemIds }, isActive: activeOnly } },
-                    { $group: { _id: '$sectionItem', count: { $sum: 1 } } }
-                ]);
-                
-                // Create a map of section item ID to count
-                const countsMap = subsectionCounts.reduce((acc, item) => {
-                    acc[item._id.toString()] = item.count;
-                    return acc;
-                }, {} as { [key: string]: number });
-                
-                // Add count to each section item
-                sectionItems.forEach(sectionItem => {
-                    const id = sectionItem._id.toString();
-                    (sectionItem as any).subsectionCount = countsMap[id] || 0;
-                });
-            }
-            
-            return sectionItems;
-        } catch (error) {
-            if (error instanceof AppError) throw error;
-            throw AppError.database('Failed to retrieve section items by WebSite ID', error);
+        // Check cache first
+        const cacheKey = `sectionitems_website_${websiteId}_${activeOnly}_${limit}_${skip}_${includeSubSectionCount}`;
+        const cached = await cacheService.get(cacheKey);
+        if (cached) {
+            return cached;
         }
+
+        const matchStage: any = { WebSiteId: new mongoose.Types.ObjectId(websiteId) };
+        if (activeOnly) {
+            matchStage.isActive = true;
         }
+
+        const pipeline = [
+            { $match: matchStage },
+            { $sort: { order: 1, createdAt: -1 } },
+            { $skip: skip },
+            { $limit: limit },
+            
+            // Lookup section
+            {
+                $lookup: {
+                    from: 'sections',
+                    localField: 'section',
+                    foreignField: '_id',
+                    as: 'section',
+                    pipeline: activeOnly ? [{ $match: { isActive: true } }] : []
+                }
+            },
+            
+            // Conditionally add subsection count
+            ...(includeSubSectionCount ? [{
+                $lookup: {
+                    from: 'subsections',
+                    let: { sectionItemId: '$_id' },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: { $eq: ['$sectionItem', '$$sectionItemId'] },
+                                ...(activeOnly && { isActive: true })
+                            }
+                        },
+                        { $count: 'count' }
+                    ],
+                    as: 'subsectionCount'
+                }
+            }, {
+                $addFields: {
+                    subsectionCount: { $ifNull: [{ $arrayElemAt: ['$subsectionCount.count', 0] }, 0] }
+                }
+            }] : []),
+            
+            // Unwind section
+            { $unwind: { path: '$section', preserveNullAndEmptyArrays: true } }
+        ];
+
+        const result = await SectionItemModel.aggregate(pipeline);
+        
+        // Cache for 3 minutes
+        await cacheService.set(cacheKey, result, { ttl: 180 });
+        
+        return result;
+    } catch (error) {
+        if (error instanceof AppError) throw error;
+        throw AppError.database('Failed to retrieve section items by WebSite ID', error);
+    }
+}
+
         
     /**
      * Update section item by ID

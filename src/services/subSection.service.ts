@@ -5,6 +5,7 @@ import mongoose from 'mongoose';
 import SectionItemModel from '../models/sectionItems.model';
 import ContentTranslationModel from '../models/ContentTranslation.model';
 import { AppError } from '../middleware/errorHandler.middleware';
+import cacheService from './cache.service';
 
 class SubSectionService {
     /**
@@ -100,55 +101,90 @@ class SubSectionService {
      * @param includeContentCount Whether to include content element count
      * @returns Promise with array of subsections
      */
-    async getAllSubSections(
-        activeOnly = true, 
-        limit = 100, 
-        skip = 0,
-        includeContentCount = false
-    ): Promise<ICreateSubSection[]> {
-        try {
-            const query = activeOnly ? { isActive: true } : {};
-            
-            const subsections = await SubSectionModel.find(query)
-                .sort({ order: 1, createdAt: -1 })
-                .skip(skip)
-                .limit(limit)
-                .populate({
-                    path: 'sectionItem',
-                    match: activeOnly ? { isActive: true } : {},
-                    options: { sort: { order: 1 } }
-                })
-                .populate('section')
-                .populate('languages');
-            
-            // Include content element count logic stays the same...
-            if (includeContentCount && subsections.length > 0) {
-                const subsectionIds = subsections.map(subsection => subsection._id);
-                
-                // Get counts for each subsection
-                const contentCounts = await ContentElementModel.aggregate([
-                    { $match: { parent: { $in: subsectionIds }, isActive: activeOnly } },
-                    { $group: { _id: '$parent', count: { $sum: 1 } } }
-                ]);
-                
-                // Create a map of subsection ID to count
-                const countsMap = contentCounts.reduce((acc, item) => {
-                    acc[item._id.toString()] = item.count;
-                    return acc;
-                }, {} as { [key: string]: number });
-                
-                // Add count to each subsection
-                subsections.forEach(subsection => {
-                    const id = subsection._id.toString();
-                    (subsection as any).contentCount = countsMap[id] || 0;
-                });
-            }
-            
-            return subsections;
-        } catch (error) {
-            throw AppError.database('Failed to retrieve subsections', error);
+  async getAllSubSections(
+    activeOnly = true,
+    limit = 100,
+    skip = 0,
+    includeContentCount = false
+): Promise<any[]> {
+    try {
+        // Check cache first
+        const cacheKey = `all_subsections_${activeOnly}_${limit}_${skip}_${includeContentCount}`;
+        const cached = await cacheService.get(cacheKey);
+        if (cached) {
+            return cached;
         }
+
+        const query = activeOnly ? { isActive: true } : {};
+        
+        // Use lean() for better performance on read-only operations
+        const subsections = await SubSectionModel.find(query, {
+            // Project only needed fields
+            name: 1,
+            description: 1,
+            slug: 1,
+            isActive: 1,
+            order: 1,
+            isMain: 1,
+            sectionItem: 1,
+            section: 1,
+            WebSiteId: 1,
+            languages: 1,
+            createdAt: 1,
+            updatedAt: 1
+        })
+        .sort({ order: 1, createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate({
+            path: 'sectionItem',
+            match: activeOnly ? { isActive: true } : {},
+            select: 'name description isActive order section',
+            options: { sort: { order: 1 } }
+        })
+        .populate({
+            path: 'section',
+            select: 'name subName isActive order'
+        })
+        .populate({
+            path: 'languages',
+            select: 'language languageID isActive'
+        })
+        .lean(); // Use lean() for better performance
+
+        // Add content count if requested (batch operation)
+        if (includeContentCount && subsections.length > 0) {
+            const subsectionIds = subsections.map(sub => sub._id);
+            
+            const contentCounts = await ContentElementModel.aggregate([
+                { 
+                    $match: { 
+                        parent: { $in: subsectionIds },
+                        ...(activeOnly && { isActive: true })
+                    }
+                },
+                { $group: { _id: '$parent', count: { $sum: 1 } } }
+            ]);
+            
+            const countsMap = contentCounts.reduce((acc, item) => {
+                acc[item._id.toString()] = item.count;
+                return acc;
+            }, {} as { [key: string]: number });
+            
+            subsections.forEach(subsection => {
+                subsection.contentCount = countsMap[subsection._id.toString()] || 0;
+            });
+        }
+        
+        // Cache for 2 minutes
+        await cacheService.set(cacheKey, subsections, { ttl: 120 });
+        
+        return subsections;
+    } catch (error) {
+        throw AppError.database('Failed to retrieve subsections', error);
     }
+}
+
     
     
     /**
@@ -721,98 +757,107 @@ class SubSectionService {
      * @param skip Number of subsections to skip
      * @returns Promise with array of complete subsections data including elements and translations
      */
-        async getSubSectionsBySectionItemId(
-            sectionItemId: string, activeOnly = true, limit = 100, skip = 0, includeContentCount: boolean    ): Promise<any[]> {
-                    try {
-                        if (!mongoose.Types.ObjectId.isValid(sectionItemId)) {
-                            throw AppError.validation('Invalid section item ID format');
-                        }
-
-                        // Build the query to get subsections
-                        const query: any = { 
-                            sectionItem: sectionItemId 
-                        };
-                        
-                        if (activeOnly) {
-                            query.isActive = true;
-                        }
-                        
-                        // Get subsections with basic population
-                        const subsections = await SubSectionModel.find(query)
-                            .sort({ order: 1, createdAt: -1 })
-                            .skip(skip)
-                            .limit(limit)
-                            .populate({
-                                path: 'sectionItem',
-                                populate: {
-                                    path: 'section'
-                                },
-                                match: activeOnly ? { isActive: true } : {}
-                            })
-                            .populate('languages');
-                        
-                        if (subsections.length === 0) {
-                            return [];
-                        }
-
-                        // Get all subsection IDs
-                        const subsectionIds = subsections.map(sub => sub._id);
-
-                        // Get all content elements for these subsections
-                        const contentElements = await ContentElementModel.find({
-                            parent: { $in: subsectionIds },
-                            isActive: activeOnly
-                        }).sort({ order: 1 });
-
-                        // Get all element IDs
-                        const elementIds = contentElements.map(element => element._id);
-
-                        // Get all translations for these elements in a single query
-                        const translations = await ContentTranslationModel.find({
-                            contentElement: { $in: elementIds },
-                            isActive: activeOnly
-                        }).populate('language');
-
-                        // Group translations by content element ID
-                        const translationsByElement: Record<string, any[]> = {};
-                        
-                        translations.forEach(translation => {
-                            const elementId = translation.contentElement.toString();
-                            if (!translationsByElement[elementId]) {
-                                translationsByElement[elementId] = [];
-                            }
-                            translationsByElement[elementId].push(translation);
-                        });
-
-                        // Group content elements by subsection ID
-                        const elementsBySubsection: Record<string, any[]> = {};
-                        
-                        contentElements.forEach(element => {
-                            const subsectionId = element.parent.toString();
-                            if (!elementsBySubsection[subsectionId]) {
-                                elementsBySubsection[subsectionId] = [];
-                            }
-                            
-                            const elementData = element.toObject();
-                            const elementId = element._id.toString();
-                            elementData.translations = translationsByElement[elementId] || [];
-                            elementsBySubsection[subsectionId].push(elementData);
-                        });
-
-                        // Create complete result with subsections and their elements
-                        const result = subsections.map(subsection => {
-                            const subsectionData = subsection.toObject();
-                            const subsectionId = subsection._id.toString();
-                            subsectionData.elements = elementsBySubsection[subsectionId] || [];
-                            return subsectionData;
-                        });
-
-                        return result;
-                    } catch (error) {
-                        if (error instanceof AppError) throw error;
-                        throw AppError.database('Failed to retrieve complete subsections by section item ID', error);
-                    }
+      async getSubSectionsBySectionItemId(
+    sectionItemId: string,
+    activeOnly = true,
+    limit = 100,
+    skip = 0,
+    includeContentCount = false
+): Promise<any[]> {
+    try {
+        if (!mongoose.Types.ObjectId.isValid(sectionItemId)) {
+            throw AppError.validation('Invalid section item ID format');
         }
+
+        // Check cache first
+        const cacheKey = `subsections_sectionitem_${sectionItemId}_${activeOnly}_${limit}_${skip}_${includeContentCount}`;
+        const cached = await cacheService.get(cacheKey);
+        if (cached) {
+            return cached;
+        }
+
+        const matchStage: any = { sectionItem: new mongoose.Types.ObjectId(sectionItemId) };
+        if (activeOnly) {
+            matchStage.isActive = true;
+        }
+
+        const pipeline = [
+            { $match: matchStage },
+            { $sort: { order: 1, createdAt: -1 } },
+            { $skip: skip },
+            { $limit: limit },
+            
+            // Lookup section item with section
+            {
+                $lookup: {
+                    from: 'sectionitems',
+                    let: { sectionItemId: '$sectionItem' },
+                    pipeline: [
+                        { $match: { $expr: { $eq: ['$_id', '$$sectionItemId'] } } },
+                        ...(activeOnly ? [{ $match: { isActive: true } }] : []),
+                        // Lookup section within sectionItem
+                        {
+                            $lookup: {
+                                from: 'sections',
+                                localField: 'section',
+                                foreignField: '_id',
+                                as: 'section'
+                            }
+                        },
+                        { $unwind: { path: '$section', preserveNullAndEmptyArrays: true } }
+                    ],
+                    as: 'sectionItem'
+                }
+            },
+            
+            // Lookup languages
+            {
+                $lookup: {
+                    from: 'languages',
+                    localField: 'languages',
+                    foreignField: '_id',
+                    as: 'languages'
+                }
+            },
+            
+            // Conditionally add content count
+            ...(includeContentCount ? [{
+                $lookup: {
+                    from: 'contentelements',
+                    let: { subsectionId: '$_id' },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: { $eq: ['$parent', '$$subsectionId'] },
+                                ...(activeOnly && { isActive: true })
+                            }
+                        },
+                        { $count: 'count' }
+                    ],
+                    as: 'contentCount'
+                }
+            }, {
+                $addFields: {
+                    contentCount: { $ifNull: [{ $arrayElemAt: ['$contentCount.count', 0] }, 0] }
+                }
+            }] : []),
+            
+            // Unwind sectionItem
+            { $unwind: { path: '$sectionItem', preserveNullAndEmptyArrays: true } }
+        ];
+
+        const result = await SubSectionModel.aggregate(pipeline);
+        
+        // Cache for 3 minutes
+        await cacheService.set(cacheKey, result, { ttl: 180 });
+        
+        return result;
+    } catch (error) {
+        if (error instanceof AppError) throw error;
+        throw AppError.database('Failed to retrieve subsections by section item ID', error);
+    }
+}
+
         /**
      * Get subsections by WebSite ID
      * @param websiteId The WebSite ID
@@ -897,102 +942,124 @@ class SubSectionService {
      * @returns Promise with array of complete subsections data including elements and translations
      */
     async getCompleteSubSectionsByWebSiteId(
-        websiteId: string,
-        activeOnly = true,
-        limit = 100,
-        skip = 0
-    ): Promise<any[]> {
-        try {
-            if (!mongoose.Types.ObjectId.isValid(websiteId)) {
-                throw AppError.validation('Invalid WebSite ID format');
-            }
-
-            // Build the query to get subsections
-            const query: any = { 
-                WebSiteId: websiteId 
-            };
-            
-            if (activeOnly) {
-                query.isActive = true;
-            }
-            
-            // Get subsections with basic population
-            const subsections = await SubSectionModel.find(query)
-                .sort({ order: 1, createdAt: -1 })
-                .skip(skip)
-                .limit(limit)
-                .populate({
-                    path: 'sectionItem',
-                    populate: {
-                        path: 'section'
-                    },
-                    match: activeOnly ? { isActive: true } : {}
-                })
-                .populate('section')
-                .populate('languages');
-            
-            if (subsections.length === 0) {
-                return [];
-            }
-
-            // Get all subsection IDs
-            const subsectionIds = subsections.map(sub => sub._id);
-
-            // Get all content elements for these subsections
-            const contentElements = await ContentElementModel.find({
-                parent: { $in: subsectionIds },
-                isActive: activeOnly
-            }).sort({ order: 1 });
-
-            // Get all element IDs
-            const elementIds = contentElements.map(element => element._id);
-
-            // Get all translations for these elements in a single query
-            const translations = await ContentTranslationModel.find({
-                contentElement: { $in: elementIds },
-                isActive: activeOnly
-            }).populate('language');
-
-            // Group translations by content element ID
-            const translationsByElement: Record<string, any[]> = {};
-            
-            translations.forEach(translation => {
-                const elementId = translation.contentElement.toString();
-                if (!translationsByElement[elementId]) {
-                    translationsByElement[elementId] = [];
-                }
-                translationsByElement[elementId].push(translation);
-            });
-
-            // Group content elements by subsection ID
-            const elementsBySubsection: Record<string, any[]> = {};
-            
-            contentElements.forEach(element => {
-                const subsectionId = element.parent.toString();
-                if (!elementsBySubsection[subsectionId]) {
-                    elementsBySubsection[subsectionId] = [];
-                }
-                
-                const elementData = element.toObject();
-                const elementId = element._id.toString();
-                elementData.translations = translationsByElement[elementId] || [];
-                elementsBySubsection[subsectionId].push(elementData);
-            });
-
-            // Create complete result with subsections and their elements
-            const result = subsections.map(subsection => {
-                const subsectionData = subsection.toObject();
-                const subsectionId = subsection._id.toString();
-                subsectionData.elements = elementsBySubsection[subsectionId] || [];
-                return subsectionData;
-            });
-
-            return result;
-        } catch (error) {
-            if (error instanceof AppError) throw error;
-            throw AppError.database('Failed to retrieve complete subsections by WebSite ID', error);
+    websiteId: string,
+    activeOnly = true,
+    limit = 100,
+    skip = 0
+): Promise<any[]> {
+    try {
+        if (!mongoose.Types.ObjectId.isValid(websiteId)) {
+            throw AppError.validation('Invalid WebSite ID format');
         }
+
+        // Check cache first
+        const cacheKey = `complete_subsections_website_${websiteId}_${activeOnly}_${limit}_${skip}`;
+        const cached = await cacheService.get(cacheKey);
+        if (cached) {
+            return cached;
+        }
+
+        const matchStage: any = { WebSiteId: new mongoose.Types.ObjectId(websiteId) };
+        if (activeOnly) {
+            matchStage.isActive = true;
+        }
+
+        const pipeline = [
+            { $match: matchStage },
+            { $sort: { order: 1, createdAt: -1 } },
+            { $skip: skip },
+            { $limit: limit },
+            
+            // Lookup section item
+            {
+                $lookup: {
+                    from: 'sectionitems',
+                    localField: 'sectionItem',
+                    foreignField: '_id',
+                    as: 'sectionItem',
+                    pipeline: activeOnly ? [{ $match: { isActive: true } }] : []
+                }
+            },
+            
+            // Lookup section
+            {
+                $lookup: {
+                    from: 'sections',
+                    localField: 'section',
+                    foreignField: '_id',
+                    as: 'section'
+                }
+            },
+            
+            // Lookup languages
+            {
+                $lookup: {
+                    from: 'languages',
+                    localField: 'languages',
+                    foreignField: '_id',
+                    as: 'languages'
+                }
+            },
+            
+            // Lookup content elements with translations in one go
+            {
+                $lookup: {
+                    from: 'contentelements',
+                    let: { subsectionId: '$_id' },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: { $eq: ['$parent', '$$subsectionId'] },
+                                ...(activeOnly && { isActive: true })
+                            }
+                        },
+                        { $sort: { order: 1 } },
+                        // Lookup translations for each element
+                        {
+                            $lookup: {
+                                from: 'contenttranslations',
+                                let: { elementId: '$_id' },
+                                pipeline: [
+                                    {
+                                        $match: {
+                                            $expr: { $eq: ['$contentElement', '$$elementId'] },
+                                            ...(activeOnly && { isActive: true })
+                                        }
+                                    },
+                                    {
+                                        $lookup: {
+                                            from: 'languages',
+                                            localField: 'language',
+                                            foreignField: '_id',
+                                            as: 'language'
+                                        }
+                                    },
+                                    { $unwind: { path: '$language', preserveNullAndEmptyArrays: true } }
+                                ],
+                                as: 'translations'
+                            }
+                        }
+                    ],
+                    as: 'elements'
+                }
+            },
+            
+            // Unwind arrays for better structure
+            { $unwind: { path: '$sectionItem', preserveNullAndEmptyArrays: true } },
+            { $unwind: { path: '$section', preserveNullAndEmptyArrays: true } }
+        ];
+
+        const result = await SubSectionModel.aggregate(pipeline);
+        
+        // Cache for 5 minutes
+        await cacheService.set(cacheKey, result, { ttl: 300 });
+        
+        return result;
+    } catch (error) {
+        if (error instanceof AppError) throw error;
+        throw AppError.database('Failed to retrieve complete subsections by WebSite ID', error);
     }
+}
 
     /**
  * Get main subsection for a given WebSite
@@ -1446,91 +1513,101 @@ async getNavigationSubSectionsByWebSiteId(
             throw AppError.validation('Invalid WebSite ID format');
         }
 
-        // Build the query to get navigation subsections
-        const query: any = { 
-            WebSiteId: websiteId,
-            name: 'Navigation'
-        };
-        
-        if (activeOnly) {
-            query.isActive = true;
-        }
-        
-        // Get all navigation subsections with basic population
-        const subsections = await SubSectionModel.find(query)
-            .sort({ order: 1, createdAt: -1 })
-            .skip(skip)
-            .limit(limit)
-            .populate({
-                path: 'sectionItem',
-                populate: {
-                    path: 'section'
-                },
-                match: activeOnly ? { isActive: true } : {}
-            })
-            .populate('section')
-            .populate('languages');
-        
-        if (subsections.length === 0) {
-            return [];
+        // Check cache first - longer cache for navigation as it changes less frequently
+        const cacheKey = `navigation_subsections_${websiteId}_${activeOnly}`;
+        const cached = await cacheService.get(cacheKey);
+        if (cached) {
+            return cached;
         }
 
-        // Get all subsection IDs
-        const subsectionIds = subsections.map(sub => sub._id);
-
-        // Get all content elements for these subsections
-        const contentElements = await ContentElementModel.find({
-            parent: { $in: subsectionIds },
-            isActive: activeOnly
-        }).sort({ order: 1 });
-
-        // Get all element IDs
-        const elementIds = contentElements.map(element => element._id);
-
-        // Get all translations for these elements in a single query
-        const translations = await ContentTranslationModel.find({
-            contentElement: { $in: elementIds },
-            isActive: activeOnly
-        }).populate('language');
-
-        // Group translations by content element ID
-        const translationsByElement: Record<string, any[]> = {};
-        
-        translations.forEach(translation => {
-            const elementId = translation.contentElement.toString();
-            if (!translationsByElement[elementId]) {
-                translationsByElement[elementId] = [];
-            }
-            translationsByElement[elementId].push(translation);
-        });
-
-        // Group content elements by subsection ID
-        const elementsBySubsection: Record<string, any[]> = {};
-        
-        contentElements.forEach(element => {
-            const subsectionId = element.parent.toString();
-            if (!elementsBySubsection[subsectionId]) {
-                elementsBySubsection[subsectionId] = [];
-            }
+        const pipeline = [
+            {
+                $match: {
+                    WebSiteId: new mongoose.Types.ObjectId(websiteId),
+                    name: 'Navigation',
+                    ...(activeOnly && { isActive: true })
+                }
+            },
+            { $sort: { order: 1, createdAt: -1 } },
+            { $skip: skip },
+            { $limit: limit },
             
-            const elementData = element.toObject();
-            const elementId = element._id.toString();
-            elementData.translations = translationsByElement[elementId] || [];
-            elementsBySubsection[subsectionId].push(elementData);
-        });
+            // Optimized lookup for navigation content
+            {
+                $lookup: {
+                    from: 'contentelements',
+                    let: { subsectionId: '$_id' },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: { $eq: ['$parent', '$$subsectionId'] },
+                                ...(activeOnly && { isActive: true })
+                            }
+                        },
+                        { $sort: { order: 1 } },
+                        // Only get essential fields for navigation
+                        {
+                            $project: {
+                                name: 1,
+                                type: 1,
+                                defaultContent: 1,
+                                order: 1,
+                                metadata: 1
+                            }
+                        },
+                        // Get translations
+                        {
+                            $lookup: {
+                                from: 'contenttranslations',
+                                let: { elementId: '$_id' },
+                                pipeline: [
+                                    {
+                                        $match: {
+                                            $expr: { $eq: ['$contentElement', '$$elementId'] },
+                                            ...(activeOnly && { isActive: true })
+                                        }
+                                    },
+                                    {
+                                        $lookup: {
+                                            from: 'languages',
+                                            localField: 'language',
+                                            foreignField: '_id',
+                                            as: 'language',
+                                            pipeline: [{ $project: { language: 1, languageID: 1 } }]
+                                        }
+                                    },
+                                    { $unwind: '$language' },
+                                    { $project: { content: 1, language: 1 } }
+                                ],
+                                as: 'translations'
+                            }
+                        }
+                    ],
+                    as: 'elements'
+                }
+            },
+            
+            // Project only necessary fields for navigation
+            {
+                $project: {
+                    name: 1,
+                    slug: 1,
+                    order: 1,
+                    isMain: 1,
+                    elements: 1
+                }
+            }
+        ];
 
-        // Create complete result with subsections and their elements
-        const result = subsections.map(subsection => {
-            const subsectionData = subsection.toObject();
-            const subsectionId = subsection._id.toString();
-            subsectionData.elements = elementsBySubsection[subsectionId] || [];
-            return subsectionData;
-        });
-
+        const result = await SubSectionModel.aggregate(pipeline);
+        
+        // Cache navigation for 10 minutes (longer since it changes less frequently)
+        await cacheService.set(cacheKey, result, { ttl: 600 });
+        
         return result;
     } catch (error) {
         if (error instanceof AppError) throw error;
-        throw AppError.database('Failed to retrieve navigation subsections by WebSite ID', error);
+        throw AppError.database('Failed to retrieve navigation subsections', error);
     }
 }
 }

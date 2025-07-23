@@ -5,6 +5,7 @@ import SectionModel from '../models/sections.model';
 import SubSectionModel from '../models/subSections.model';
 import SectionItemModel from '../models/sectionItems.model';
 import { boolean } from 'joi';
+import cacheService from './cache.service';
 
 interface IMultilingualName {
   en: string;
@@ -716,21 +717,55 @@ getSectionDescriptionByLanguage(section: any, language: 'en' | 'ar' | 'tr' = 'en
    * @param includeInactive Whether to include inactive sections (default: false)
    * @returns Array of sections belonging to the website
    */
-  async getSectionsByWebsiteId(websiteId: Schema.Types.ObjectId | string, includeInactive: boolean) {
-    try {
-      console.log()
-      if (!websiteId) {
-        throw new Error('Website ID is required');
-      }
+  async getSectionsByWebsiteId(
+      websiteId: string,
+      includeInactive: boolean = false
+  ): Promise<any[]> {
+      try {
+          if (!websiteId) {
+              throw new Error('Website ID is required');
+          }
 
-      const query: any = { WebSiteId: websiteId };
-  
-      
-      const sections = await SectionModel.find(query).sort({ order: 1 });
-      return sections;
-    } catch (error) {
-      throw error;
-    }
+          // Check cache first - sections don't change frequently
+          const cacheKey = `sections_website_${websiteId}_${includeInactive}`;
+          const cached = await cacheService.get(cacheKey);
+          if (cached) {
+              return cached;
+          }
+
+          const matchQuery: any = { WebSiteId: new mongoose.Types.ObjectId(websiteId) };
+          if (!includeInactive) {
+              matchQuery.isActive = true;
+          }
+
+          const pipeline = [
+              { $match: matchQuery },
+              { $sort: { order: 1 } },
+              // Only project necessary fields for better performance
+              {
+                  $project: {
+                      name: 1,
+                      subName: 1,
+                      description: 1,
+                      image: 1,
+                      isActive: 1,
+                      order: 1,
+                      WebSiteId: 1,
+                      createdAt: 1,
+                      updatedAt: 1
+                  }
+              }
+          ];
+
+          const sections = await SectionModel.aggregate(pipeline);
+          
+          // Cache for 10 minutes - sections change infrequently
+          await cacheService.set(cacheKey, sections, { ttl: 600 });
+          
+          return sections;
+      } catch (error) {
+          throw error;
+      }
   }
 
   /**
@@ -740,34 +775,124 @@ getSectionDescriptionByLanguage(section: any, language: 'en' | 'ar' | 'tr' = 'en
    * @param languageId Optional language ID for translations
    * @returns Array of sections with their items and subsections
    */
-  async getSectionsWithDataByWebsiteId(
-    websiteId: Schema.Types.ObjectId | string, 
-    includeInactive: boolean = false, 
+ async getSectionsWithDataByWebsiteId(
+    websiteId: string,
+    includeInactive: boolean = false,
     languageId?: string
-  ) {
+): Promise<any[]> {
     try {
-      if (!websiteId) {
-        throw new Error('Website ID is required');
-      }
+        if (!websiteId) {
+            throw new Error('Website ID is required');
+        }
 
-      // Get sections for this website
-      const query: { WebSiteId: Schema.Types.ObjectId | string; isActive?: boolean } = { WebSiteId: websiteId };
-      if (!includeInactive) {
-        query.isActive = true;
-      }
-      
-      // Use the existing getAllSectionsWithData method with our website-specific query
-      const sectionsWithData = await this.getAllSectionsWithData(
-        query,
-        includeInactive,
-        languageId
-      );
-      
-      return sectionsWithData;
+        // Check cache first
+        const cacheKey = `sections_complete_${websiteId}_${includeInactive}_${languageId || 'all'}`;
+        const cached = await cacheService.get(cacheKey);
+        if (cached) {
+            return cached;
+        }
+
+        const sectionMatchQuery: any = { WebSiteId: new mongoose.Types.ObjectId(websiteId) };
+        if (!includeInactive) {
+            sectionMatchQuery.isActive = true;
+        }
+
+        const pipeline = [
+            { $match: sectionMatchQuery },
+            { $sort: { order: 1 } },
+            
+            // Lookup section items
+            {
+                $lookup: {
+                    from: 'sectionitems',
+                    let: { sectionId: '$_id' },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: { $eq: ['$section', '$$sectionId'] },
+                                ...(includeInactive ? {} : { isActive: true })
+                            }
+                        },
+                        { $sort: { order: 1 } },
+                        
+                        // Lookup subsections for each section item
+                        {
+                            $lookup: {
+                                from: 'subsections',
+                                let: { sectionItemId: '$_id' },
+                                pipeline: [
+                                    {
+                                        $match: {
+                                            $expr: { $eq: ['$sectionItem', '$$sectionItemId'] },
+                                            ...(includeInactive ? {} : { isActive: true })
+                                        }
+                                    },
+                                    { $sort: { order: 1 } },
+                                    
+                                    // Conditionally lookup content elements and translations
+                                    ...(languageId ? [{
+                                        $lookup: {
+                                            from: 'contentelements',
+                                            let: { subsectionId: '$_id' },
+                                            pipeline: [
+                                                {
+                                                    $match: {
+                                                        $expr: { $eq: ['$parent', '$$subsectionId'] },
+                                                        ...(includeInactive ? {} : { isActive: true })
+                                                    }
+                                                },
+                                                { $sort: { order: 1 } },
+                                                // Lookup translations
+                                                {
+                                                    $lookup: {
+                                                        from: 'contenttranslations',
+                                                        let: { elementId: '$_id' },
+                                                        pipeline: [
+                                                            {
+                                                                $match: {
+                                                                    $expr: { 
+                                                                        $and: [
+                                                                            { $eq: ['$contentElement', '$$elementId'] },
+                                                                            { $eq: ['$language', new mongoose.Types.ObjectId(languageId)] }
+                                                                        ]
+                                                                    },
+                                                                    ...(includeInactive ? {} : { isActive: true })
+                                                                }
+                                                            }
+                                                        ],
+                                                        as: 'translations'
+                                                    }
+                                                },
+                                                {
+                                                    $addFields: {
+                                                        value: { $arrayElemAt: ['$translations.content', 0] }
+                                                    }
+                                                },
+                                                { $project: { translations: 0 } } // Remove translations array to save bandwidth
+                                            ],
+                                            as: 'elements'
+                                        }
+                                    }] : [])
+                                ],
+                                as: 'subsections'
+                            }
+                        }
+                    ],
+                    as: 'sectionItems'
+                }
+            }
+        ];
+
+        const result = await SectionModel.aggregate(pipeline);
+        
+        // Cache for 5 minutes for complete data
+        await cacheService.set(cacheKey, result, { ttl: 300 });
+        
+        return result;
     } catch (error) {
-      throw error;
+        throw error;
     }
-  }
+}
   /**
  * Check if a section with the given name already exists for a website
  * Useful for debugging duplicate section name issues
@@ -902,38 +1027,78 @@ getSectionDescriptionByLanguage(section: any, language: 'en' | 'ar' | 'tr' = 'en
  * @param websiteId Optional website ID to filter by specific website
  * @returns Array of sections with only id, name, and subName
  */
-async getBasicSectionInfo(query: any = {}, websiteId?: string) {
-  try {
-    // Build the query
-    const finalQuery: any = { ...query };
-    
-    // Add website filter if provided
-    if (websiteId) {
-      finalQuery.WebSiteId = websiteId;
+async getBasicSectionInfo(query: any = {}, websiteId?: string): Promise<any[]> {
+    try {
+        // Build the query
+        const finalQuery: any = { ...query };
+        
+        if (websiteId) {
+            finalQuery.WebSiteId = new mongoose.Types.ObjectId(websiteId);
+        }
+
+        // Check cache first
+        const cacheKey = `basic_sections_${JSON.stringify(finalQuery)}`;
+        const cached = await cacheService.get(cacheKey);
+        if (cached) {
+            return cached;
+        }
+
+        // Use aggregation for better performance and memory usage
+        const pipeline = [
+            { $match: finalQuery },
+            { $sort: { order: 1 } },
+            {
+                $project: {
+                    _id: 1,
+                    name: 1,
+                    subName: 1
+                }
+            },
+            {
+                $addFields: {
+                    id: '$_id'
+                }
+            },
+            { $project: { _id: 0 } }
+        ];
+
+        const sections = await SectionModel.aggregate(pipeline);
+        
+        // Cache for 15 minutes - basic info changes rarely
+        await cacheService.set(cacheKey, sections, { ttl: 900 });
+        
+        return sections;
+    } catch (error) {
+        console.error('Error fetching basic section info:', error);
+        throw error;
     }
-    
-    // Only select the fields we need for better performance
-    const sections = await SectionModel.find(finalQuery)
-      .select('_id name subName')  // Only select id, name, and subName
-      .sort({ order: 1 })
-      .lean(); // Use lean() for better performance since we don't need mongoose document methods
-    
-    // Transform the data to have a cleaner structure
-    const basicSectionInfo = sections.map(section => ({
-      id: section._id,
-      name: {
-        en: section.name.en,
-        ar: section.name.ar,
-        tr: section.name.tr
-      },
-      subName: section.subName
-    }));
-    
-    return basicSectionInfo;
-  } catch (error) {
-    console.error('Error fetching basic section info:', error);
-    throw error;
-  }
+}
+
+// Cache invalidation methods - call these when data changes
+async invalidateSectionCache(websiteId: string, sectionId?: string): Promise<void> {
+    try {
+        // Invalidate all section-related caches for this website
+        await cacheService.delPattern(`sections_*_${websiteId}_*`);
+        await cacheService.delPattern(`basic_sections_*${websiteId}*`);
+        
+        if (sectionId) {
+            await cacheService.delPattern(`section_${sectionId}_*`);
+            // Also invalidate section items and subsections cache
+            await cacheService.delPattern(`sectionitems_section_${sectionId}_*`);
+        }
+    } catch (error) {
+        console.error('Error invalidating section cache:', error);
+    }
+}
+
+async invalidateWebsiteCache(websiteId: string): Promise<void> {
+    try {
+        // Invalidate all website-related caches
+        await cacheService.delPattern(`*_${websiteId}_*`);
+        await cacheService.delPattern(`*website_${websiteId}*`);
+    } catch (error) {
+        console.error('Error invalidating website cache:', error);
+    }
 }
 
 /**

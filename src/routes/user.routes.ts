@@ -11,7 +11,6 @@ import {
   updateUserStatusValidator 
 } from '../validations/user.validation';
 import userController from '../controllers/user.controller';
-import { UserRole } from 'src/types/user.types';
 
 const router = express.Router();
 

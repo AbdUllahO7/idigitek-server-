@@ -24,6 +24,7 @@ import webSiteThem from './routes/webSiteTheme.route'
 import contactForm from './routes/contact.routes'
 
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.middleware';
+import { CacheOptimizer } from './services/cache.optimization';
 
 const app: Express = express();
 
@@ -123,7 +124,17 @@ app.get('/health', (req, res) => {
     requestId: (req as any).requestId,
   });
 });
-
+if (process.env.NODE_ENV === 'production') {
+    // Preload cache on startup
+    setTimeout(() => {
+        CacheOptimizer.preloadCache();
+    }, 5000); // Wait 5 seconds after startup
+    
+    // Refresh cache every hour
+    setInterval(() => {
+        CacheOptimizer.preloadCache();
+    }, 60 * 60 * 1000);
+}
 // 404 handler for undefined routes
 app.use(notFoundHandler);
 

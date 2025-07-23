@@ -20,7 +20,7 @@ router.get('/slug/:slug/complete', subSectionController.getCompleteSubSectionByS
 
 // WebSite routes
 router.get('/website/:websiteId', subSectionController.getSubSectionsByWebSiteId);
-router.get('/website/:websiteId/complete', subSectionController.getCompleteSubSectionsByWebSiteId);
+router.get('/website/:websiteId/complete', subSectionController.getCompleteSubSectionsByWebSiteId); 
 router.get('/website/:websiteId/main', subSectionController.getMainSubSectionByWebSiteId);
 
 // Section item routes
