@@ -136,7 +136,6 @@ export class SectionController {
       throw AppError.notFound('Section not found');
     }
     
-    // 🎯 NEW: Add display name and description based on language
     let responseData = section.toObject();
     if (language && ['en', 'ar', 'tr'].includes(language as string)) {
       responseData = {
@@ -330,36 +329,34 @@ export class SectionController {
   /**
    * 🎯 UPDATED: Get all sections for a specific website with language support
    */
-  getSectionsByWebsiteId = asyncHandler(async (req: Request, res: Response) => {
-    const { websiteId } = req.params;
-    const { includeInactive, language } = req.query;
-    
-    if (!websiteId) {
-      throw AppError.badRequest('Website ID is required');
-    }
-    
-    const showInactive = includeInactive === 'true';
-    const sections = await this.sectionService.getSectionsByWebsiteId(websiteId, showInactive);
-    
-    // 🎯 FIXED: Use proper typing for transformed data
-    let responseData: any[];
-    if (language && ['en', 'ar', 'tr'].includes(language as string)) {
-      responseData = sections.map(section => ({
-        ...section.toObject(),
-        displayName: this.sectionService.getSectionNameByLanguage(section, language as 'en' | 'ar' | 'tr'),
-        displayDescription: this.sectionService.getSectionDescriptionByLanguage(section, language as 'en' | 'ar' | 'tr')
-      }));
-    } else {
-      responseData = sections.map(section => section.toObject());
-    }
-    
-    return res.status(200).json({
-      success: true,
-      count: responseData.length,
-      data: responseData
-    });
-  });
+getSectionsByWebsiteId = asyncHandler(async (req: Request, res: Response) => {
+  const { websiteId } = req.params;
+  const { includeInactive, language } = req.query;
 
+  if (!websiteId) {
+    throw AppError.badRequest('Website ID is required');
+  }
+
+  const showInactive = includeInactive === 'true';
+  const sections = await this.sectionService.getSectionsByWebsiteId(websiteId, showInactive);
+
+  let responseData: any[];
+  if (language && ['en', 'ar', 'tr'].includes(language as string)) {
+    responseData = sections.map(section => ({
+      ...('toObject' in section ? section.toObject() : section), // Check if toObject exists
+      displayName: this.sectionService.getSectionNameByLanguage(section, language as 'en' | 'ar' | 'tr'),
+      displayDescription: this.sectionService.getSectionDescriptionByLanguage(section, language as 'en' | 'ar' | 'tr')
+    }));
+  } else {
+    responseData = sections.map(section => ('toObject' in section ? section.toObject() : section));
+  }
+
+  return res.status(200).json({
+    success: true,
+    count: responseData.length,
+    data: responseData
+  });
+});
   /**
    * Get all sections with complete data for a specific website (unchanged)
    */

@@ -4,7 +4,7 @@
   "description": "Secure Express.js API with MongoDB, TypeScript and Microservices Architecture",
   "main": "src/server.ts",
   "engines": {
-    "node": "18.x"
+    "node": "22.x"
   },
   "scripts": {
     "start": "ts-node src/server.ts",
