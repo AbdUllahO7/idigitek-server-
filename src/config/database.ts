@@ -26,6 +26,46 @@ const getPoolConfig = () => {
   }
 };
 
+// ✅ FIXED: Safe JSON stringify function that handles circular references
+const safeStringify = (obj: any): string => {
+  const seen = new WeakSet();
+  
+  try {
+    return JSON.stringify(obj, (key, value) => {
+      // Handle circular references
+      if (typeof value === 'object' && value !== null) {
+        if (seen.has(value)) {
+          return '[Circular Reference]';
+        }
+        seen.add(value);
+      }
+      
+      // Filter out MongoDB specific objects that cause circular references
+      if (value && typeof value === 'object') {
+        // Skip MongoDB client objects
+        if (value.constructor && (
+          value.constructor.name === 'MongoClient' ||
+          value.constructor.name === 'ServerSessionPool' ||
+          value.constructor.name === 'Topology' ||
+          value.constructor.name === 'Server' ||
+          value.constructor.name === 'ClientSession'
+        )) {
+          return '[MongoDB Internal Object]';
+        }
+        
+        // Skip session objects and other problematic objects
+        if (value.sessionPool || value.s || value._client) {
+          return '[Session/Client Object]';
+        }
+      }
+      
+      return value;
+    });
+  } catch (error) {
+    return '[Object too complex to stringify]';
+  }
+};
+
 // Connection monitoring
 const setupConnectionMonitoring = () => {
   mongoose.connection.on('connected', () => {
@@ -82,13 +122,21 @@ export const connectDatabase = async (): Promise<void> => {
 
     await mongoose.connect(env.mongodb.uriTest, options);
     
-    // Enable query performance monitoring in development only
+    // ✅ FIXED: Enable query performance monitoring in development only with safe JSON stringify
     if (env.nodeEnv === 'development') {
       mongoose.set('debug', (collection, method, query, doc) => {
-        logger.info(`MongoDB Query: ${collection}.${method}`, {
-          query: JSON.stringify(query),
-          doc: doc ? JSON.stringify(doc) : undefined
-        });
+        try {
+          logger.info(`MongoDB Query: ${collection}.${method}`, {
+            query: safeStringify(query),
+            doc: doc ? safeStringify(doc) : undefined
+          });
+        } catch (error) {
+          // Fallback logging without JSON if even safe stringify fails
+          logger.info(`MongoDB Query: ${collection}.${method}`, {
+            query: '[Query object - logging failed]',
+            doc: doc ? '[Doc object - logging failed]' : undefined
+          });
+        }
       });
     }
 
