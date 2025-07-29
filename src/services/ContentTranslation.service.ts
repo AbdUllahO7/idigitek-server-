@@ -1,9 +1,16 @@
-import mongoose from 'mongoose';
+import mongoose, { Types } from 'mongoose';
 import { AppError } from '../middleware/errorHandler.middleware';
 import LanguagesModel from '../models/languages.model';
 import { IContentTranslation, ICreateContentTranslation, IUpdateContentTranslation } from '../types/ContentTranslation.type';
 import ContentElementModel from '../models/ContentElement.model';
 import ContentTranslationModel from '../models/ContentTranslation.model';
+import Redis from 'ioredis';
+
+// Initialize Redis client
+const redis = new Redis({
+  host: process.env.REDIS_HOST,
+  port: Number(process.env.REDIS_PORT),
+});
 
 class ContentTranslationService {
   /**
@@ -12,58 +19,72 @@ class ContentTranslationService {
    * @returns Promise with the created translation
    */
   async createTranslation(data: ICreateContentTranslation): Promise<IContentTranslation> {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
-      // Validate contentElement exists
-      const elementExists = await ContentElementModel.exists({ _id: data.contentElement });
+      // Validate contentElement and language existence (lean for performance)
+      const [elementExists, languageExists] = await Promise.all([
+        ContentElementModel.exists({ _id: data.contentElement }).lean().session(session),
+        LanguagesModel.exists({ _id: data.language }).lean().session(session),
+      ]);
+
       if (!elementExists) {
         throw AppError.notFound(`Content element with ID ${data.contentElement} not found`);
       }
-
-      // Validate language exists
-      const languageExists = await LanguagesModel.exists({ _id: data.language });
       if (!languageExists) {
         throw AppError.notFound(`Language with ID ${data.language} not found`);
       }
 
-      // Check if translation for this language and element already exists
+      // Check for existing translation
       const existingTranslation = await ContentTranslationModel.findOne({
         contentElement: data.contentElement,
-        language: data.language
-      });
+        language: data.language,
+      }).lean().session(session);
 
       if (existingTranslation) {
         throw AppError.badRequest('Translation for this content element and language already exists');
       }
 
-      // Create the translation
-      const translation = new ContentTranslationModel(data);
-      return await translation.save();
+      // Create translation
+      const translation = await ContentTranslationModel.create([data], { session });
+      await session.commitTransaction();
+      return translation[0];
     } catch (error) {
+      await session.abortTransaction();
       if (error instanceof AppError) throw error;
       throw AppError.database('Failed to create translation', error);
+    } finally {
+      session.endSession();
     }
   }
 
   /**
-   * Get translation by ID
+   * Get translation by ID with caching
    * @param id The translation ID
    * @returns Promise with the translation
    */
   async getTranslationById(id: string): Promise<IContentTranslation> {
     try {
-      if (!mongoose.Types.ObjectId.isValid(id)) {
+      if (!Types.ObjectId.isValid(id)) {
         throw AppError.validation('Invalid translation ID format');
       }
 
-      const translation = await ContentTranslationModel.findById(id)
+      // Check cache
+      const cacheKey = `translation:${id}`;
+      const cached = await redis.get(cacheKey);
+      if (cached) return JSON.parse(cached);
+
+      const translation = await ContentTranslationModel.findLean({ _id: id })
         .populate('language')
         .populate('contentElement');
-      
-      if (!translation) {
+
+      if (!translation.length) {
         throw AppError.notFound(`Translation with ID ${id} not found`);
       }
-      
-      return translation;
+
+      await redis.set(cacheKey, JSON.stringify(translation[0]), 'EX', 3600); // Cache for 1 hour
+      return translation[0];
     } catch (error) {
       if (error instanceof AppError) throw error;
       throw AppError.database('Failed to retrieve translation', error);
@@ -71,28 +92,30 @@ class ContentTranslationService {
   }
 
   /**
-   * Get all translations for a content element
+   * Get all translations for a content element with caching
    * @param contentElementId The content element ID
    * @param activeOnly Whether to return only active translations
    * @returns Promise with array of translations
    */
   async getTranslationsByContentElement(contentElementId: string, activeOnly: boolean = true): Promise<IContentTranslation[]> {
     try {
-      if (!mongoose.Types.ObjectId.isValid(contentElementId)) {
+      if (!Types.ObjectId.isValid(contentElementId)) {
         throw AppError.validation('Invalid content element ID format');
       }
 
-      // Build query
-      const query: any = { contentElement: contentElementId };
-      if (activeOnly) {
-        query.isActive = true;
-      }
+      // Check cache
+      const cacheKey = `translations:contentElement:${contentElementId}:${activeOnly}`;
+      const cached = await redis.get(cacheKey);
+      if (cached) return JSON.parse(cached);
 
-      // Get translations
-      const translations = await ContentTranslationModel.find(query)
+      const query: any = { contentElement: contentElementId };
+      if (activeOnly) query.isActive = true;
+
+      const translations = await ContentTranslationModel.findLean(query)
         .populate('language')
         .sort({ 'language.language': 1 });
 
+      await redis.set(cacheKey, JSON.stringify(translations), 'EX', 3600); // Cache for 1 hour
       return translations;
     } catch (error) {
       if (error instanceof AppError) throw error;
@@ -101,28 +124,30 @@ class ContentTranslationService {
   }
 
   /**
-   * Get all translations for a language
+   * Get all translations for a language with caching
    * @param languageId The language ID
    * @param activeOnly Whether to return only active translations
    * @returns Promise with array of translations
    */
   async getTranslationsByLanguage(languageId: string, activeOnly: boolean = true): Promise<IContentTranslation[]> {
     try {
-      if (!mongoose.Types.ObjectId.isValid(languageId)) {
+      if (!Types.ObjectId.isValid(languageId)) {
         throw AppError.validation('Invalid language ID format');
       }
 
-      // Build query
-      const query: any = { language: languageId };
-      if (activeOnly) {
-        query.isActive = true;
-      }
+      // Check cache
+      const cacheKey = `translations:language:${languageId}:${activeOnly}`;
+      const cached = await redis.get(cacheKey);
+      if (cached) return JSON.parse(cached);
 
-      // Get translations
-      const translations = await ContentTranslationModel.find(query)
+      const query: any = { language: languageId };
+      if (activeOnly) query.isActive = true;
+
+      const translations = await ContentTranslationModel.findLean(query)
         .populate('contentElement')
         .sort({ 'contentElement.order': 1 });
 
+      await redis.set(cacheKey, JSON.stringify(translations), 'EX', 3600); // Cache for 1 hour
       return translations;
     } catch (error) {
       if (error instanceof AppError) throw error;
@@ -138,20 +163,25 @@ class ContentTranslationService {
    */
   async getTranslation(contentElementId: string, languageId: string): Promise<IContentTranslation | null> {
     try {
-      if (!mongoose.Types.ObjectId.isValid(contentElementId)) {
-        throw AppError.validation('Invalid content element ID format');
+      if (!Types.ObjectId.isValid(contentElementId) || !Types.ObjectId.isValid(languageId)) {
+        throw AppError.validation('Invalid content element or language ID format');
       }
 
-      if (!mongoose.Types.ObjectId.isValid(languageId)) {
-        throw AppError.validation('Invalid language ID format');
-      }
+      // Check cache
+      const cacheKey = `translation:${contentElementId}:${languageId}`;
+      const cached = await redis.get(cacheKey);
+      if (cached) return JSON.parse(cached);
 
-      const translation = await ContentTranslationModel.findOne({
+      const translation = await ContentTranslationModel.findLean({
         contentElement: contentElementId,
-        language: languageId
-      }).populate('language').populate('contentElement');
+        language: languageId,
+      })
+        .populate('language')
+        .populate('contentElement');
 
-      return translation;
+      const result = translation.length ? translation[0] : null;
+      await redis.set(cacheKey, JSON.stringify(result), 'EX', 3600); // Cache for 1 hour
+      return result;
     } catch (error) {
       if (error instanceof AppError) throw error;
       throw AppError.database('Failed to retrieve translation', error);
@@ -165,39 +195,74 @@ class ContentTranslationService {
    * @returns Promise with the updated translation
    */
   async updateTranslation(id: string, updateData: IUpdateContentTranslation): Promise<IContentTranslation> {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
-      if (!mongoose.Types.ObjectId.isValid(id)) {
+      if (!Types.ObjectId.isValid(id)) {
         throw AppError.validation('Invalid translation ID format');
       }
 
-      // If changing element or language, check for existing translations
-      if (updateData.contentElement && updateData.language) {
-        const existingTranslation = await ContentTranslationModel.findOne({
-          _id: { $ne: id },
-          contentElement: updateData.contentElement,
-          language: updateData.language
-        });
+      // Validate new contentElement or language if provided
+      if (updateData.contentElement || updateData.language) {
+        const [elementExists, languageExists] = await Promise.all([
+          updateData.contentElement
+            ? ContentElementModel.exists({ _id: updateData.contentElement }).lean().session(session)
+            : Promise.resolve(true),
+          updateData.language
+            ? LanguagesModel.exists({ _id: updateData.language }).lean().session(session)
+            : Promise.resolve(true),
+        ]);
 
-        if (existingTranslation) {
-          throw AppError.badRequest('Translation for this content element and language already exists');
+        if (!elementExists) {
+          throw AppError.notFound(`Content element with ID ${updateData.contentElement} not found`);
+        }
+        if (!languageExists) {
+          throw AppError.notFound(`Language with ID ${updateData.language} not found`);
+        }
+
+        // Check for existing translation
+        if (updateData.contentElement && updateData.language) {
+          const existingTranslation = await ContentTranslationModel.findOne({
+            _id: { $ne: id },
+            contentElement: updateData.contentElement,
+            language: updateData.language,
+          }).lean().session(session);
+
+          if (existingTranslation) {
+            throw AppError.badRequest('Translation for this content element and language already exists');
+          }
         }
       }
 
-      // Update the translation
+      // Update translation
       const translation = await ContentTranslationModel.findByIdAndUpdate(
         id,
         { $set: updateData },
-        { new: true, runValidators: true }
-      ).populate('language').populate('contentElement');
-      
+        { new: true, runValidators: true, lean: true }
+      ).session(session);
+
       if (!translation) {
         throw AppError.notFound(`Translation with ID ${id} not found`);
       }
-      
+
+      await session.commitTransaction();
+
+      // Invalidate cache
+      await Promise.all([
+        redis.del(`translation:${id}`),
+        redis.del(`translation:${translation.contentElement}:${translation.language}`),
+        redis.keys(`translations:*${translation.contentElement}*`).then((keys) => redis.del(keys)),
+        redis.keys(`translations:*${translation.language}*`).then((keys) => redis.del(keys)),
+      ]);
+
       return translation;
     } catch (error) {
+      await session.abortTransaction();
       if (error instanceof AppError) throw error;
       throw AppError.database('Failed to update translation', error);
+    } finally {
+      session.endSession();
     }
   }
 
@@ -208,31 +273,47 @@ class ContentTranslationService {
    * @returns Promise with the operation result
    */
   async deleteTranslation(id: string, hardDelete: boolean = false): Promise<{ success: boolean; message: string }> {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
-      if (!mongoose.Types.ObjectId.isValid(id)) {
+      if (!Types.ObjectId.isValid(id)) {
         throw AppError.validation('Invalid translation ID format');
       }
 
-      const translation = await ContentTranslationModel.findById(id);
+      const translation = await ContentTranslationModel.findById(id).lean().session(session);
       if (!translation) {
         throw AppError.notFound(`Translation with ID ${id} not found`);
       }
 
       if (hardDelete) {
-        await ContentTranslationModel.findByIdAndDelete(id);
-        return { success: true, message: 'Translation deleted successfully' };
+        await ContentTranslationModel.findByIdAndDelete(id).session(session);
       } else {
-        // Soft delete - just mark as inactive
-        translation.isActive = false;
-        await translation.save();
-        return { success: true, message: 'Translation deactivated successfully' };
+        await ContentTranslationModel.findByIdAndUpdate(id, { $set: { isActive: false } }).session(session);
       }
+
+      await session.commitTransaction();
+
+      // Invalidate cache
+      await Promise.all([
+        redis.del(`translation:${id}`),
+        redis.del(`translation:${translation.contentElement}:${translation.language}`),
+        redis.keys(`translations:*${translation.contentElement}*`).then((keys) => redis.del(keys)),
+        redis.keys(`translations:*${translation.language}*`).then((keys) => redis.del(keys)),
+      ]);
+
+      return {
+        success: true,
+        message: hardDelete ? 'Translation deleted successfully' : 'Translation deactivated successfully',
+      };
     } catch (error) {
+      await session.abortTransaction();
       if (error instanceof AppError) throw error;
       throw AppError.database('Failed to delete translation', error);
+    } finally {
+      session.endSession();
     }
   }
-
   /**
    * Bulk create or update translations
    * @param translations Array of translation data
