@@ -51,10 +51,10 @@ if (process.env.VERCEL) {
 
   initializeApp()
     .then(() => {
-      server = app.listen(env.port, () => {
-        logger.info(`Server running in ${env.nodeEnv} mode on port ${env.port}`);
-        logger.info(`API available at http://localhost:${env.port}/api/${env.apiVersion}`);
-      });
+    server = app.listen(env.port, "0.0.0.0", () => {
+  logger.info(`Server running in ${env.nodeEnv} mode on port ${env.port}`);
+  logger.info(`API available at http://0.0.0.0:${env.port}/api/${env.apiVersion}`);
+});
 
       process.on('unhandledRejection', (error) => {
         logger.error('Unhandled Rejection:', error);
