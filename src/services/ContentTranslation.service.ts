@@ -19,61 +19,221 @@ class ContentTranslationService {
    * @returns Promise with the created translation
    */
   async createTranslation(data: ICreateContentTranslation): Promise<IContentTranslation> {
-    const session = await mongoose.startSession();
-    let isTransactionActive = false;
+  const session = await mongoose.startSession();
+  let isTransactionActive = false;
 
-    try {
-      await session.startTransaction();
-      isTransactionActive = true;
+  // Log incoming request data
+  console.log('=== TRANSLATION CREATE REQUEST ===');
+  console.log('Request Data:', JSON.stringify(data, null, 2));
+  console.log('Data Types:', {
+    contentElement: typeof data.contentElement,
+    language: typeof data.language,
+    content: typeof data.content,
+    isActive: typeof data.isActive
+  });
 
-      // Validate contentElement and language existence (lean for performance)
-      const [elementExists, languageExists] = await Promise.all([
-        ContentElementModel.exists({ _id: data.contentElement }).lean().session(session),
-        LanguagesModel.exists({ _id: data.language }).lean().session(session),
-      ]);
+  try {
+    await session.startTransaction();
+    isTransactionActive = true;
+    console.log('✅ Transaction started successfully');
 
-      if (!elementExists) {
-        throw AppError.notFound(`Content element with ID ${data.contentElement} not found`);
-      }
-      if (!languageExists) {
-        throw AppError.notFound(`Language with ID ${data.language} not found`);
-      }
+    // Enhanced validation with detailed logging
+    console.log('🔍 Starting validation checks...');
+    
+    // Validate ObjectId formats first
+    if (!mongoose.Types.ObjectId.isValid(data.contentElement)) {
+      console.error('❌ Invalid contentElement ObjectId format:', data.contentElement);
+      throw AppError.validation(`Invalid contentElement ID format: ${data.contentElement}`);
+    }
+    
+    if (!mongoose.Types.ObjectId.isValid(data.language)) {
+      console.error('❌ Invalid language ObjectId format:', data.language);
+      throw AppError.validation(`Invalid language ID format: ${data.language}`);
+    }
 
-      // Check for existing translation
-      const existingTranslation = await ContentTranslationModel.findOne({
+    console.log('✅ ObjectId formats are valid');
+
+    // Check database existence
+    console.log('🔍 Checking database existence...');
+    
+    const elementExistsPromise = ContentElementModel.exists({ _id: data.contentElement }).lean().session(session);
+    const languageExistsPromise = LanguagesModel.exists({ _id: data.language }).lean().session(session);
+
+    const [elementExists, languageExists] = await Promise.all([
+      elementExistsPromise.catch(err => {
+        console.error('❌ Error checking element existence:', err);
+        throw err;
+      }),
+      languageExistsPromise.catch(err => {
+        console.error('❌ Error checking language existence:', err);
+        throw err;
+      })
+    ]);
+
+    console.log('Database existence results:', {
+      elementExists: !!elementExists,
+      languageExists: !!languageExists,
+      elementId: elementExists?._id,
+      languageId: languageExists?._id
+    });
+
+    if (!elementExists) {
+      const error = `Content element with ID ${data.contentElement} not found`;
+      console.error('❌ Element not found:', error);
+      throw AppError.notFound(error);
+    }
+    
+    if (!languageExists) {
+      const error = `Language with ID ${data.language} not found`;
+      console.error('❌ Language not found:', error);
+      throw AppError.notFound(error);
+    }
+
+    console.log('✅ Database existence validation passed');
+
+    // Check for duplicate translation
+    console.log('🔍 Checking for existing translation...');
+    
+    const existingTranslation = await ContentTranslationModel.findOne({
+      contentElement: data.contentElement,
+      language: data.language,
+    }).lean().session(session).catch(err => {
+      console.error('❌ Error checking existing translation:', err);
+      throw err;
+    });
+
+    console.log('Existing translation check result:', {
+      found: !!existingTranslation,
+      translationId: existingTranslation?._id,
+      isActive: existingTranslation?.isActive
+    });
+
+    if (existingTranslation) {
+      const error = 'Translation for this content element and language already exists';
+      console.error('❌ Duplicate translation found:', {
+        existingId: existingTranslation._id,
         contentElement: data.contentElement,
         language: data.language,
-      }).lean().session(session);
+        isActive: existingTranslation.isActive
+      });
+      throw AppError.badRequest(error);
+    }
 
-      if (existingTranslation) {
-        throw AppError.badRequest('Translation for this content element and language already exists');
-      }
+    console.log('✅ No duplicate translation found');
 
-      // Create translation
-      const translation = await ContentTranslationModel.create([data], { session });
-      
-      await session.commitTransaction();
-      isTransactionActive = false;
-      
-      return translation[0];
-    } catch (error) {
-      if (isTransactionActive) {
-        try {
-          await session.abortTransaction();
-        } catch (abortError) {
-          console.error('Error aborting transaction in createTranslation:', abortError);
-        }
-      }
-      if (error instanceof AppError) throw error;
-      throw AppError.database('Failed to create translation', error);
-    } finally {
+    // Prepare translation data with explicit field mapping
+    const translationData = {
+      content: data.content,
+      contentElement: new mongoose.Types.ObjectId(data.contentElement as string),
+      language: new mongoose.Types.ObjectId(data.language as string),
+      isActive: data.isActive !== undefined ? data.isActive : true,
+      metadata: data.metadata || {},
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    console.log('📝 Prepared translation data:', {
+      contentLength: translationData.content?.length,
+      contentElement: translationData.contentElement.toString(),
+      language: translationData.language.toString(),
+      isActive: translationData.isActive,
+      hasMetadata: Object.keys(translationData.metadata).length > 0
+    });
+
+    // Create translation with detailed error handling
+    console.log('✨ Creating translation document...');
+    
+    const translation = await ContentTranslationModel.create([translationData], { session })
+      .catch(err => {
+        console.error('❌ MongoDB create error:', {
+          name: err.name,
+          message: err.message,
+          code: err.code,
+          codeName: err.codeName,
+          writeErrors: err.writeErrors,
+          validationErrors: err.errors
+        });
+        throw err;
+      });
+
+    if (!translation || translation.length === 0) {
+      console.error('❌ Translation creation returned empty result');
+      throw new Error('Translation creation failed - empty result');
+    }
+
+    console.log('✅ Translation document created:', {
+      id: translation[0]._id,
+      contentElement: translation[0].contentElement,
+      language: translation[0].language,
+      contentLength: translation[0].content?.length
+    });
+
+    // Commit transaction
+    console.log('💾 Committing transaction...');
+    await session.commitTransaction().catch(err => {
+      console.error('❌ Transaction commit error:', err);
+      throw err;
+    });
+    
+    isTransactionActive = false;
+    console.log('✅ Transaction committed successfully');
+
+    console.log('=== TRANSLATION CREATE SUCCESS ===');
+    return translation[0];
+
+  } catch (error) {
+    console.log('=== TRANSLATION CREATE ERROR ===');
+    console.error('💥 Error details:', {
+      name: error.name,
+      message: error.message,
+      code: error.code,
+      stack: error.stack?.split('\n').slice(0, 10).join('\n'),
+      isAppError: error instanceof AppError,
+      isMongoError: error.name?.includes('Mongo'),
+      isValidationError: error.name === 'ValidationError',
+      transactionActive: isTransactionActive
+    });
+
+    if (isTransactionActive) {
+      console.log('🔄 Aborting transaction...');
       try {
-        session.endSession();
-      } catch (endError) {
-        console.error('Error ending session in createTranslation:', endError);
+        await session.abortTransaction();
+        console.log('✅ Transaction aborted successfully');
+      } catch (abortError) {
+        console.error('💥 Transaction abort error:', {
+          name: abortError.name,
+          message: abortError.message
+        });
       }
     }
+
+    if (error instanceof AppError) {
+      console.log('📤 Throwing AppError');
+      throw error;
+    }
+
+    console.log('📤 Creating database AppError');
+    throw AppError.database('Failed to create translation', {
+      originalError: error.message,
+      errorName: error.name,
+      errorCode: error.code
+    });
+
+  } finally {
+    console.log('🧹 Cleaning up session...');
+    try {
+      session.endSession();
+      console.log('✅ Session ended successfully');
+    } catch (endError) {
+      console.error('💥 Session cleanup error:', {
+        name: endError.name,
+        message: endError.message
+      });
+    }
+    console.log('=== TRANSLATION CREATE END ===\n');
   }
+}
+
 
   /**
    * Get translation by ID with caching
