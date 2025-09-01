@@ -56,7 +56,7 @@ const insertAdminUser = async () => {
     // Create the admin user
     const adminUser = new UserModel({
       email: 'idigitekAdmin@idigitek.com',
-      password: 'idigitek176984', // This will be hashed by the model's pre-save hook
+      password: 'idigitek176984', 
       firstName: 'IDigi',
       lastName: 'Admin',
       role: 'idigitekAdmin', // Make sure this role exists in your UserRole enum
