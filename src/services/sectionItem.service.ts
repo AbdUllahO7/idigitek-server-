@@ -13,7 +13,7 @@ class SectionItemService {
    * @param itemData The section item data to create
    * @returns Promise with the created section item
    */
-  async createSectionItem(itemData: IService): Promise<IServiceDocument> {
+async createSectionItem(itemData: IService): Promise<IServiceDocument> {
     try {
       console.log('createSectionItem input:', itemData); // Log input for debugging
 
@@ -38,9 +38,39 @@ class SectionItemService {
         throw AppError.validation(`Invalid subsections ID: ${itemData.subsections}`);
       }
       if (itemData.subsections) {
-        const subsectionExists = await SubSectionModel.findById(itemData.subsections); // Fixed to use SubSectionModel
+        const subsectionExists = await SubSectionModel.findById(itemData.subsections);
         if (!subsectionExists) {
           throw AppError.notFound(`Subsection with ID ${itemData.subsections} not found`);
+        }
+      }
+
+      // Auto-generate order if not provided or if it conflicts
+      let finalOrder = itemData.order;
+      
+      if (finalOrder === undefined || finalOrder === null) {
+        // Get the highest order in this section and increment by 1
+        const highestOrderItem = await SectionItemModel
+          .findOne({ section: itemData.section })
+          .sort({ order: -1 })
+          .select('order');
+        
+        finalOrder = (highestOrderItem?.order ?? -1) + 1;
+      } else {
+        // Check if the provided order already exists in this section
+        const existingItem = await SectionItemModel.findOne({
+          section: itemData.section,
+          order: finalOrder,
+        });
+        
+        if (existingItem) {
+          // If order exists, find the next available order
+          const highestOrderItem = await SectionItemModel
+            .findOne({ section: itemData.section })
+            .sort({ order: -1 })
+            .select('order');
+          
+          finalOrder = (highestOrderItem?.order ?? -1) + 1;
+          console.log(`Order ${itemData.order} already exists in section, using ${finalOrder} instead`);
         }
       }
 
@@ -49,7 +79,7 @@ class SectionItemService {
         name: itemData.name,
         description: itemData.description,
         image: itemData.image,
-        order: itemData.order || 0,
+        order: finalOrder, // Use the calculated order
         isActive: itemData.isActive !== undefined ? itemData.isActive : true,
         section: itemData.section,
         subsections: itemData.subsections,
