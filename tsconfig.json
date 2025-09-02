@@ -34,8 +34,7 @@
     "exactOptionalPropertyTypes": false,
     "noPropertyAccessFromIndexSignature": false,
     "noUncheckedIndexedAccess": false,
-    // Additional options to suppress errors
-    "suppressOutputPathCheck": true
+
   },
   "exclude": ["node_modules"],
   "include": ["./src/**/*.ts"],
