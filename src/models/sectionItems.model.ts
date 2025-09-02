@@ -71,21 +71,26 @@ sectionItemSchema.statics.findLean = function (query: any) {
   return this.find(query).lean().exec();
 };
 
-// Pre-save hook to ensure order uniqueness within section
-sectionItemSchema.pre('save', function (next) {
+
+sectionItemSchema.pre('save', async function (next) {
   const doc = this as IServiceDocument;
   if (doc.isModified('order')) {
-    sectionItemSchema
-      .findOne({ section: doc.section, order: doc.order, _id: { $ne: doc._id } })
-      .then((existing) => {
-        if (existing) throw new Error('Order must be unique within section');
-        next();
-      })
-      .catch(next);
+    try {
+      const existing = await SectionItemModel.findOne({
+        section: doc.section,
+        order: doc.order,
+        _id: { $ne: doc._id },
+      });
+      if (existing) throw new Error('Order must be unique within section');
+      next();
+    } catch (err) {
+      next(err);
+    }
   } else {
     next();
   }
 });
+
 
 // Create model
 const SectionItemModel = model<IServiceDocument>('SectionItems', sectionItemSchema);
