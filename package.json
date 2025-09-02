@@ -9,7 +9,7 @@
   "scripts": {
     "start": "ts-node src/server.ts",
     "dev": "nodemon --exec ts-node --transpile-only src/server.ts",
-    "build": "tsc",
+       "build": "esbuild src/**/*.ts --outdir=dist --platform=node --format=cjs",
     "vercel-build": "echo 'Vercel deployment - using direct TypeScript compilation'",
     "dev:micro": "concurrently \"npm run dev:gateway\" \"npm run dev:auth\" \"npm run dev:content\" \"npm run dev:website\" \"npm run dev:user\"",
     "dev:gateway": "cross-env PORT=4000 nodemon --exec ts-node --transpile-only src/gateway/server.ts",
@@ -112,6 +112,7 @@
     "axios": "^1.6.2",
     "concurrently": "^7.6.0",
     "cross-env": "^7.0.3",
+    "esbuild": "^0.25.9",
     "eslint": "^8.55.0",
     "jest": "^29.7.0",
     "nodemon": "^3.0.2",

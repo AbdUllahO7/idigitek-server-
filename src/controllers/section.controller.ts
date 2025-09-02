@@ -136,7 +136,6 @@ export class SectionController {
       throw AppError.notFound('Section not found');
     }
     
-    // 🎯 NEW: Add display name and description based on language
     let responseData = section.toObject();
     if (language && ['en', 'ar', 'tr'].includes(language as string)) {
       responseData = {
