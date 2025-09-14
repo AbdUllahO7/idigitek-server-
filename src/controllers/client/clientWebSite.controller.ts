@@ -4,7 +4,7 @@ import { AppError } from '../../middleware/errorHandler.middleware';
 import { ClientWebSiteService } from '../../services/clinet/clientWebSite.service';
 
 const clientWebSiteService = new ClientWebSiteService();
-
+/*  */
 class ClientWebSiteController {
     /**
    * Get all websites for a specific user with sections and languages
