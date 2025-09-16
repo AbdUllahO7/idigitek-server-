@@ -1,4 +1,4 @@
-import express, { Express } from 'express';
+import express, { Express ,Request, Response, NextFunction} from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
@@ -28,7 +28,15 @@ import { errorHandler, notFoundHandler } from './middleware/errorHandler.middlew
 import logger from './config/logger';
 
 const app: Express = express();
-
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const host = req.get('Host');
+  
+  if (host === 'dijitaleser.com' || host === 'www.dijitaleser.com/') {
+    return res.redirect(301, `https://idigitek.com${req.url}`);
+  }
+  
+  next();
+});
 // Add unique identifier to each request - important for error tracking
 app.use(requestIdMiddleware);
 
