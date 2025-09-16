@@ -31,7 +31,7 @@ const app: Express = express();
 app.use((req: Request, res: Response, next: NextFunction) => {
   const host = req.get('Host');
   
-  if (host === 'dijitaleser.com' || host === 'www.dijitaleser.com/') {
+  if (host === 'dijitaleser.com' || host === 'www.dijitaleser.com') {
     return res.redirect(301, `https://idigitek.com${req.url}`);
   }
   
