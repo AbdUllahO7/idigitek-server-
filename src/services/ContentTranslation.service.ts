@@ -409,6 +409,14 @@ class ContentTranslationService {
 
       return translation;
     } catch (error) {
+      console.error('💥 UPDATE TRANSLATION ERROR:', error);
+      console.error('Error details:', {
+        name: error.name,
+        message: error.message,
+        code: error.code,
+        stack: error.stack?.split('\n').slice(0, 5)
+      });
+      
       if (isTransactionActive) {
         try {
           await session.abortTransaction();
