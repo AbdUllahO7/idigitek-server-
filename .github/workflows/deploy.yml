@@ -1,20 +1,48 @@
-name: Deploy Server
+name: Deploy idigitek-server
 
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Deploy to VPS
-      uses: appleboy/ssh-action@v1.0.0
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Deploy to Server
+      uses: appleboy/ssh-action@master
       with:
-        host: ${{ secrets.VPS_HOST }}
-        username: ${{ secrets.VPS_USERNAME }}
-        key: ${{ secrets.VPS_SSH_KEY }}
+        host: ${{ secrets.SERVER_HOST }}
+        username: ${{ secrets.SERVER_USER }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
         script: |
-          /var/scripts/deploy-server.sh
+          # Navigate to project directory
+          cd /var/www/idigitek-server
+          
+          # Clone or pull latest code
+          if [ ! -d ".git" ]; then
+            git clone https://github.com/idigitek/idigitek-server.git .
+          else
+            git pull origin main
+          fi
+          
+          # Create .env file
+          cat > .env << EOF
+          MONGODB_URI=${{ secrets.MONGODB_URI }}
+          NODE_ENV=production
+          PORT=4000
+          API_VERSION=v1
+          CORS_ALLOWED_ORIGINS=http://72.60.36.167:3001,http://72.60.36.167:3002,http://72.60.36.167:3003,http://72.60.36.167:3004
+          EOF
+          
+          # Install dependencies
+          npm install
+          
+          # Build TypeScript
+          npm run build
+          
+          # Restart with PM2
+          pm2 restart idigitek-server || pm2 start dist/server.js --name "idigitek-server"

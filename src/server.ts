@@ -19,7 +19,7 @@ const initializeApp = async () => {
   }
 };
 
-// For Vercel serverless environment
+// For Vercel serverless environment  
 if (process.env.VERCEL) {
   // Export for serverless
   module.exports = async (req: any, res: any) => {
