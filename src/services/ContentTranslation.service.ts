@@ -4,13 +4,6 @@ import LanguagesModel from '../models/languages.model';
 import { IContentTranslation, ICreateContentTranslation, IUpdateContentTranslation } from '../types/ContentTranslation.type';
 import ContentElementModel from '../models/ContentElement.model';
 import ContentTranslationModel from '../models/ContentTranslation.model';
-import Redis from 'ioredis';
-
-// Initialize Redis client
-const redis = new Redis({
-  host: process.env.REDIS_HOST,
-  port: Number(process.env.REDIS_PORT),
-});
 
 class ContentTranslationService {
   /**
@@ -236,7 +229,7 @@ class ContentTranslationService {
 
 
   /**
-   * Get translation by ID with caching
+   * Get translation by ID
    * @param id The translation ID
    * @returns Promise with the translation
    */
@@ -246,11 +239,6 @@ class ContentTranslationService {
         throw AppError.validation('Invalid translation ID format');
       }
 
-      // Check cache
-      const cacheKey = `translation:${id}`;
-      const cached = await redis.get(cacheKey);
-      if (cached) return JSON.parse(cached);
-
       const translation = await ContentTranslationModel.findLean({ _id: id })
         .populate('language')
         .populate('contentElement');
@@ -259,7 +247,6 @@ class ContentTranslationService {
         throw AppError.notFound(`Translation with ID ${id} not found`);
       }
 
-      await redis.set(cacheKey, JSON.stringify(translation[0]), 'EX', 3600); // Cache for 1 hour
       return translation[0];
     } catch (error) {
       if (error instanceof AppError) throw error;
@@ -268,7 +255,7 @@ class ContentTranslationService {
   }
 
   /**
-   * Get all translations for a content element with caching
+   * Get all translations for a content element
    * @param contentElementId The content element ID
    * @param activeOnly Whether to return only active translations
    * @returns Promise with array of translations
@@ -279,11 +266,6 @@ class ContentTranslationService {
         throw AppError.validation('Invalid content element ID format');
       }
 
-      // Check cache
-      const cacheKey = `translations:contentElement:${contentElementId}:${activeOnly}`;
-      const cached = await redis.get(cacheKey);
-      if (cached) return JSON.parse(cached);
-
       const query: any = { contentElement: contentElementId };
       if (activeOnly) query.isActive = true;
 
@@ -291,7 +273,6 @@ class ContentTranslationService {
         .populate('language')
         .sort({ 'language.language': 1 });
 
-      await redis.set(cacheKey, JSON.stringify(translations), 'EX', 3600); // Cache for 1 hour
       return translations;
     } catch (error) {
       if (error instanceof AppError) throw error;
@@ -300,7 +281,7 @@ class ContentTranslationService {
   }
 
   /**
-   * Get all translations for a language with caching
+   * Get all translations for a language
    * @param languageId The language ID
    * @param activeOnly Whether to return only active translations
    * @returns Promise with array of translations
@@ -311,11 +292,6 @@ class ContentTranslationService {
         throw AppError.validation('Invalid language ID format');
       }
 
-      // Check cache
-      const cacheKey = `translations:language:${languageId}:${activeOnly}`;
-      const cached = await redis.get(cacheKey);
-      if (cached) return JSON.parse(cached);
-
       const query: any = { language: languageId };
       if (activeOnly) query.isActive = true;
 
@@ -323,7 +299,6 @@ class ContentTranslationService {
         .populate('contentElement')
         .sort({ 'contentElement.order': 1 });
 
-      await redis.set(cacheKey, JSON.stringify(translations), 'EX', 3600); // Cache for 1 hour
       return translations;
     } catch (error) {
       if (error instanceof AppError) throw error;
@@ -343,11 +318,6 @@ class ContentTranslationService {
         throw AppError.validation('Invalid content element or language ID format');
       }
 
-      // Check cache
-      const cacheKey = `translation:${contentElementId}:${languageId}`;
-      const cached = await redis.get(cacheKey);
-      if (cached) return JSON.parse(cached);
-
       const translation = await ContentTranslationModel.findLean({
         contentElement: contentElementId,
         language: languageId,
@@ -355,9 +325,7 @@ class ContentTranslationService {
         .populate('language')
         .populate('contentElement');
 
-      const result = translation.length ? translation[0] : null;
-      await redis.set(cacheKey, JSON.stringify(result), 'EX', 3600); // Cache for 1 hour
-      return result;
+      return translation.length ? translation[0] : null;
     } catch (error) {
       if (error instanceof AppError) throw error;
       throw AppError.database('Failed to retrieve translation', error);
@@ -365,7 +333,7 @@ class ContentTranslationService {
   }
 
   /**
-   * Update translation by ID - FIXED VERSION
+   * Update translation by ID
    * @param id The translation ID
    * @param updateData The data to update
    * @returns Promise with the updated translation
@@ -420,14 +388,14 @@ class ContentTranslationService {
         { 
           $set: {
             ...updateData,
-            updatedAt: new Date() // Ensure updatedAt is set
+            updatedAt: new Date()
           }
         },
         { 
           new: true, 
           runValidators: true, 
           lean: true,
-          session // Make sure to use the session
+          session
         }
       );
 
@@ -438,14 +406,6 @@ class ContentTranslationService {
       // Commit the transaction
       await session.commitTransaction();
       isTransactionActive = false;
-
-      // Invalidate cache (do this after successful transaction)
-      try {
-        await this.invalidateTranslationCache(translation);
-      } catch (cacheError) {
-        console.error('Cache invalidation error (non-fatal):', cacheError);
-        // Don't fail the request for cache errors
-      }
 
       return translation;
     } catch (error) {
@@ -464,28 +424,6 @@ class ContentTranslationService {
       } catch (endError) {
         console.error('Error ending session in updateTranslation:', endError);
       }
-    }
-  }
-
-  /**
-   * Helper method to invalidate translation cache
-   * @param translation The translation object
-   */
-  private async invalidateTranslationCache(translation: any): Promise<void> {
-    try {
-      await Promise.all([
-        redis.del(`translation:${translation._id}`),
-        redis.del(`translation:${translation.contentElement}:${translation.language}`),
-        redis.keys(`translations:*${translation.contentElement}*`).then((keys) => 
-          keys.length > 0 ? redis.del(...keys) : Promise.resolve()
-        ),
-        redis.keys(`translations:*${translation.language}*`).then((keys) => 
-          keys.length > 0 ? redis.del(...keys) : Promise.resolve()
-        ),
-      ]);
-    } catch (error) {
-      console.error('Cache invalidation error:', error);
-      // Don't throw - cache errors should not fail the main operation
     }
   }
 
@@ -525,13 +463,6 @@ class ContentTranslationService {
       await session.commitTransaction();
       isTransactionActive = false;
 
-      // Invalidate cache
-      try {
-        await this.invalidateTranslationCache(translation);
-      } catch (cacheError) {
-        console.error('Cache invalidation error (non-fatal):', cacheError);
-      }
-
       return {
         success: true,
         message: hardDelete ? 'Translation deleted successfully' : 'Translation deactivated successfully',
@@ -556,337 +487,286 @@ class ContentTranslationService {
   }
 
   /**
-   * Bulk create or update translations - IMPROVED VERSION
+   * Bulk create or update translations
    * @param translations Array of translation data
    * @returns Promise with success message and count
    */
-  /**
-   * Bulk create or update translations - FIXED VERSION with proper transaction handling
-   * @param translations Array of translation data
-   * @returns Promise with success message and count
-   */
-  /**
- * Bulk create or update translations - COMPLETELY REWRITTEN VERSION
- * @param translations Array of translation data
- * @returns Promise with success message and count
- */
-async bulkUpsertTranslations(translations: (ICreateContentTranslation & { id?: string })[]): 
-  Promise<{ success: boolean; message: string; created: number; updated: number; errors?: string[] }> {
-  
-  // Validate the input array first
-  if (!Array.isArray(translations) || translations.length === 0) {
-    throw AppError.validation('Translations array must not be empty');
-  }
-
-  console.log(`🚀 Starting bulk upsert for ${translations.length} translations`);
-
-  // Use a completely fresh session
-  let session: mongoose.ClientSession | null = null;
-  let isTransactionActive = false;
-
-  try {
-    // Create fresh session with explicit options
-    session = await mongoose.startSession();
+  async bulkUpsertTranslations(translations: (ICreateContentTranslation & { id?: string })[]): 
+    Promise<{ success: boolean; message: string; created: number; updated: number; errors?: string[] }> {
     
-    // Start transaction with retry options
-    const transactionOptions = {
-      readPreference: 'primary',
-      readConcern: { level: 'local' as const },
-      writeConcern: { 
-        w: 'majority' as const, 
-        j: true,
-        wtimeout: 10000 
-      }
-    };
+    // Validate the input array first
+    if (!Array.isArray(translations) || translations.length === 0) {
+      throw AppError.validation('Translations array must not be empty');
+    }
 
-    await session.withTransaction(async () => {
-      isTransactionActive = true;
-      
-      let created = 0;
-      let updated = 0;
-      const errors: string[] = [];
+    console.log(`🚀 Starting bulk upsert for ${translations.length} translations`);
 
-      console.log(`📝 Processing ${translations.length} translations in transaction`);
+    let session: mongoose.ClientSession | null = null;
+    let isTransactionActive = false;
 
-      // Process translations in smaller batches to avoid session timeout
-      const BATCH_SIZE = 50;
-      const batches = [];
-      
-      for (let i = 0; i < translations.length; i += BATCH_SIZE) {
-        batches.push(translations.slice(i, i + BATCH_SIZE));
-      }
-
-      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-        const batch = batches[batchIndex];
-        console.log(`🔄 Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} items)`);
-
-        // Pre-validate and prepare batch
-        const validItems: any[] = [];
-        
-        for (let i = 0; i < batch.length; i++) {
-          const item = batch[i];
-          const globalIndex = batchIndex * BATCH_SIZE + i;
-          
-          try {
-            // Validate required fields
-            if (!item.contentElement || !mongoose.Types.ObjectId.isValid(item.contentElement as string)) {
-              throw new Error(`Invalid contentElement ID: ${item.contentElement}`);
-            }
-
-            if (!item.language || !mongoose.Types.ObjectId.isValid(item.language as string)) {
-              throw new Error(`Invalid language ID: ${item.language}`);
-            }
-
-            if (!item.content) {
-              throw new Error('Content is required');
-            }
-
-            // Convert to ObjectIds
-            const contentElementId = new mongoose.Types.ObjectId(item.contentElement as string);
-            const languageId = new mongoose.Types.ObjectId(item.language as string);
-
-            validItems.push({
-              ...item,
-              contentElement: contentElementId,
-              language: languageId,
-              originalIndex: globalIndex
-            });
-
-          } catch (validationError) {
-            const errorMessage = `Item ${globalIndex + 1}: ${validationError.message}`;
-            errors.push(errorMessage);
-            console.error('❌ Validation error:', errorMessage);
-          }
-        }
-
-        // Skip this batch if no valid items
-        if (validItems.length === 0) {
-          console.log(`⏭️ Skipping batch ${batchIndex + 1} - no valid items`);
-          continue;
-        }
-
-        // Batch validate references exist
-        const contentElementIds = [...new Set(validItems.map(item => item.contentElement.toString()))];
-        const languageIds = [...new Set(validItems.map(item => item.language.toString()))];
-
-        const [existingElements, existingLanguages] = await Promise.all([
-          ContentElementModel.find({ _id: { $in: contentElementIds } }, '_id').session(session).lean(),
-          LanguagesModel.find({ _id: { $in: languageIds } }, '_id').session(session).lean()
-        ]);
-
-        const existingElementIds = new Set(existingElements.map(el => el._id.toString()));
-        const existingLanguageIds = new Set(existingLanguages.map(lang => lang._id.toString()));
-
-        // Filter out items with non-existent references
-        const itemsWithValidRefs = validItems.filter(item => {
-          const elementExists = existingElementIds.has(item.contentElement.toString());
-          const languageExists = existingLanguageIds.has(item.language.toString());
-          
-          if (!elementExists) {
-            errors.push(`Item ${item.originalIndex + 1}: Content element ${item.contentElement} not found`);
-          }
-          if (!languageExists) {
-            errors.push(`Item ${item.originalIndex + 1}: Language ${item.language} not found`);
-          }
-          
-          return elementExists && languageExists;
-        });
-
-        console.log(`✅ Batch ${batchIndex + 1}: ${itemsWithValidRefs.length}/${validItems.length} items have valid references`);
-
-        // Process each valid item
-        for (const item of itemsWithValidRefs) {
-          try {
-            if (item.id && mongoose.Types.ObjectId.isValid(item.id)) {
-              // Update by ID
-              const updateResult = await ContentTranslationModel.findByIdAndUpdate(
-                item.id,
-                { 
-                  $set: {
-                    content: item.content,
-                    contentElement: item.contentElement,
-                    language: item.language,
-                    isActive: item.isActive !== undefined ? item.isActive : true,
-                    metadata: item.metadata || {},
-                    updatedAt: new Date()
-                  }
-                },
-                { 
-                  runValidators: true, 
-                  new: true, 
-                  session,
-                  lean: true
-                }
-              );
-              
-              if (!updateResult) {
-                throw new Error(`Translation with ID ${item.id} not found for update`);
-              }
-              
-              updated++;
-              console.log(`📝 Updated translation ${item.id}`);
-            } else {
-              // Upsert by contentElement + language
-              const upsertResult = await ContentTranslationModel.findOneAndUpdate(
-                {
-                  contentElement: item.contentElement,
-                  language: item.language
-                },
-                {
-                  $set: {
-                    content: item.content,
-                    isActive: item.isActive !== undefined ? item.isActive : true,
-                    metadata: item.metadata || {},
-                    updatedAt: new Date()
-                  },
-                  $setOnInsert: {
-                    contentElement: item.contentElement,
-                    language: item.language,
-                    createdAt: new Date()
-                  }
-                },
-                {
-                  upsert: true,
-                  new: true,
-                  runValidators: true,
-                  session,
-                  lean: true
-                }
-              );
-
-              if (upsertResult) {
-                // Check if it was created or updated by comparing timestamps
-                const wasCreated = upsertResult.createdAt && 
-                  Math.abs(upsertResult.createdAt.getTime() - upsertResult.updatedAt.getTime()) < 1000;
-                
-                if (wasCreated) {
-                  created++;
-                  console.log(`✨ Created translation for element ${item.contentElement} + language ${item.language}`);
-                } else {
-                  updated++;
-                  console.log(`📝 Updated translation for element ${item.contentElement} + language ${item.language}`);
-                }
-              }
-            }
-
-          } catch (itemError) {
-            const errorMessage = `Item ${item.originalIndex + 1}: ${itemError.message}`;
-            errors.push(errorMessage);
-            console.error('❌ Processing error:', errorMessage);
-          }
-        }
-      }
-
-      // Store results for access outside transaction
-      (session as any)._bulkResults = { created, updated, errors };
-      
-      console.log(`📊 Batch processing completed: ${created} created, ${updated} updated, ${errors.length} errors`);
-      
-    }, transactionOptions);
-
-    isTransactionActive = false;
-    
-    // Get results from session
-    const results = (session as any)._bulkResults || { created: 0, updated: 0, errors: [] };
-    const { created, updated, errors } = results;
-
-    console.log(`✅ Transaction completed successfully: ${created} created, ${updated} updated`);
-
-    // Clear relevant caches after successful transaction
     try {
-      const uniqueContentElements = [...new Set(translations.map(item => 
-        item.contentElement instanceof mongoose.Types.ObjectId 
-          ? item.contentElement.toString() 
-          : item.contentElement?.toString()
-      ))].filter(Boolean);
+      // Create fresh session with explicit options
+      session = await mongoose.startSession();
       
-      const uniqueLanguages = [...new Set(translations.map(item => 
-        item.language instanceof mongoose.Types.ObjectId 
-          ? item.language.toString() 
-          : item.language?.toString()
-      ))].filter(Boolean);
-      
-      // Invalidate caches for affected content elements and languages
-      const cacheKeys: string[] = [];
-      uniqueContentElements.forEach(elementId => {
-        if (elementId) {
-          cacheKeys.push(`translations:contentElement:${elementId}:true`);
-          cacheKeys.push(`translations:contentElement:${elementId}:false`);
+      // Start transaction with retry options
+      const transactionOptions = {
+        readPreference: 'primary',
+        readConcern: { level: 'local' as const },
+        writeConcern: { 
+          w: 'majority' as const, 
+          j: true,
+          wtimeout: 10000 
         }
-      });
-      
-      uniqueLanguages.forEach(languageId => {
-        if (languageId) {
-          cacheKeys.push(`translations:language:${languageId}:true`);
-          cacheKeys.push(`translations:language:${languageId}:false`);
-        }
-      });
-
-      if (cacheKeys.length > 0) {
-        await redis.del(...cacheKeys).catch(cacheError => {
-          console.error('⚠️ Cache invalidation error (non-fatal):', cacheError.message);
-        });
-        console.log(`🗑️ Invalidated ${cacheKeys.length} cache keys`);
-      }
-    } catch (cacheError) {
-      console.error('⚠️ Cache cleanup error (non-fatal):', cacheError.message);
-    }
-
-    // Return results
-    const totalProcessed = created + updated;
-    
-    if (errors.length > 0) {
-      return {
-        success: totalProcessed > 0,
-        message: `Processed ${totalProcessed} translations with ${errors.length} errors: ${created} created, ${updated} updated`,
-        created,
-        updated,
-        errors
       };
-    }
 
-    return { 
-      success: true, 
-      message: `Successfully processed ${totalProcessed} translations: ${created} created, ${updated} updated`,
-      created,
-      updated
-    };
+      await session.withTransaction(async () => {
+        isTransactionActive = true;
+        
+        let created = 0;
+        let updated = 0;
+        const errors: string[] = [];
 
-  } catch (error) {
-    console.error('💥 Bulk upsert failed:', {
-      name: error.name,
-      message: error.message,
-      code: error.code,
-      transactionActive: isTransactionActive
-    });
-    
-    if (error instanceof AppError) {
-      throw error;
-    }
-    
-    // Create more specific error messages
-    if (error.message?.includes('transaction number')) {
-      throw AppError.database('Transaction conflict detected. Please retry the operation.');
-    }
-    
-    if (error.message?.includes('session')) {
-      throw AppError.database('Database session error. Please retry the operation.');
-    }
-    
-    throw AppError.database(`Bulk upsert failed: ${error.message}`);
-    
-  } finally {
-    // Always clean up session
-    if (session) {
-      try {
-        await session.endSession();
-        console.log('🧹 Session ended successfully');
-      } catch (endError) {
-        console.error('⚠️ Error ending session:', endError.message);
+        console.log(`📝 Processing ${translations.length} translations in transaction`);
+
+        // Process translations in smaller batches to avoid session timeout
+        const BATCH_SIZE = 50;
+        const batches = [];
+        
+        for (let i = 0; i < translations.length; i += BATCH_SIZE) {
+          batches.push(translations.slice(i, i + BATCH_SIZE));
+        }
+
+        for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+          const batch = batches[batchIndex];
+          console.log(`🔄 Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} items)`);
+
+          // Pre-validate and prepare batch
+          const validItems: any[] = [];
+          
+          for (let i = 0; i < batch.length; i++) {
+            const item = batch[i];
+            const globalIndex = batchIndex * BATCH_SIZE + i;
+            
+            try {
+              // Validate required fields
+              if (!item.contentElement || !mongoose.Types.ObjectId.isValid(item.contentElement as string)) {
+                throw new Error(`Invalid contentElement ID: ${item.contentElement}`);
+              }
+
+              if (!item.language || !mongoose.Types.ObjectId.isValid(item.language as string)) {
+                throw new Error(`Invalid language ID: ${item.language}`);
+              }
+
+              if (!item.content) {
+                throw new Error('Content is required');
+              }
+
+              // Convert to ObjectIds
+              const contentElementId = new mongoose.Types.ObjectId(item.contentElement as string);
+              const languageId = new mongoose.Types.ObjectId(item.language as string);
+
+              validItems.push({
+                ...item,
+                contentElement: contentElementId,
+                language: languageId,
+                originalIndex: globalIndex
+              });
+
+            } catch (validationError) {
+              const errorMessage = `Item ${globalIndex + 1}: ${validationError.message}`;
+              errors.push(errorMessage);
+              console.error('❌ Validation error:', errorMessage);
+            }
+          }
+
+          // Skip this batch if no valid items
+          if (validItems.length === 0) {
+            console.log(`⏭️ Skipping batch ${batchIndex + 1} - no valid items`);
+            continue;
+          }
+
+          // Batch validate references exist
+          const contentElementIds = [...new Set(validItems.map(item => item.contentElement.toString()))];
+          const languageIds = [...new Set(validItems.map(item => item.language.toString()))];
+
+          const [existingElements, existingLanguages] = await Promise.all([
+            ContentElementModel.find({ _id: { $in: contentElementIds } }, '_id').session(session).lean(),
+            LanguagesModel.find({ _id: { $in: languageIds } }, '_id').session(session).lean()
+          ]);
+
+          const existingElementIds = new Set(existingElements.map(el => el._id.toString()));
+          const existingLanguageIds = new Set(existingLanguages.map(lang => lang._id.toString()));
+
+          // Filter out items with non-existent references
+          const itemsWithValidRefs = validItems.filter(item => {
+            const elementExists = existingElementIds.has(item.contentElement.toString());
+            const languageExists = existingLanguageIds.has(item.language.toString());
+            
+            if (!elementExists) {
+              errors.push(`Item ${item.originalIndex + 1}: Content element ${item.contentElement} not found`);
+            }
+            if (!languageExists) {
+              errors.push(`Item ${item.originalIndex + 1}: Language ${item.language} not found`);
+            }
+            
+            return elementExists && languageExists;
+          });
+
+          console.log(`✅ Batch ${batchIndex + 1}: ${itemsWithValidRefs.length}/${validItems.length} items have valid references`);
+
+          // Process each valid item
+          for (const item of itemsWithValidRefs) {
+            try {
+              if (item.id && mongoose.Types.ObjectId.isValid(item.id)) {
+                // Update by ID
+                const updateResult = await ContentTranslationModel.findByIdAndUpdate(
+                  item.id,
+                  { 
+                    $set: {
+                      content: item.content,
+                      contentElement: item.contentElement,
+                      language: item.language,
+                      isActive: item.isActive !== undefined ? item.isActive : true,
+                      metadata: item.metadata || {},
+                      updatedAt: new Date()
+                    }
+                  },
+                  { 
+                    runValidators: true, 
+                    new: true, 
+                    session,
+                    lean: true
+                  }
+                );
+                
+                if (!updateResult) {
+                  throw new Error(`Translation with ID ${item.id} not found for update`);
+                }
+                
+                updated++;
+                console.log(`📝 Updated translation ${item.id}`);
+              } else {
+                // Upsert by contentElement + language
+                const upsertResult = await ContentTranslationModel.findOneAndUpdate(
+                  {
+                    contentElement: item.contentElement,
+                    language: item.language
+                  },
+                  {
+                    $set: {
+                      content: item.content,
+                      isActive: item.isActive !== undefined ? item.isActive : true,
+                      metadata: item.metadata || {},
+                      updatedAt: new Date()
+                    },
+                    $setOnInsert: {
+                      contentElement: item.contentElement,
+                      language: item.language,
+                      createdAt: new Date()
+                    }
+                  },
+                  {
+                    upsert: true,
+                    new: true,
+                    runValidators: true,
+                    session,
+                    lean: true
+                  }
+                );
+
+                if (upsertResult) {
+                  // Check if it was created or updated by comparing timestamps
+                  const wasCreated = upsertResult.createdAt && 
+                    Math.abs(upsertResult.createdAt.getTime() - upsertResult.updatedAt.getTime()) < 1000;
+                  
+                  if (wasCreated) {
+                    created++;
+                    console.log(`✨ Created translation for element ${item.contentElement} + language ${item.language}`);
+                  } else {
+                    updated++;
+                    console.log(`📝 Updated translation for element ${item.contentElement} + language ${item.language}`);
+                  }
+                }
+              }
+
+            } catch (itemError) {
+              const errorMessage = `Item ${item.originalIndex + 1}: ${itemError.message}`;
+              errors.push(errorMessage);
+              console.error('❌ Processing error:', errorMessage);
+            }
+          }
+        }
+
+        // Store results for access outside transaction
+        (session as any)._bulkResults = { created, updated, errors };
+        
+        console.log(`📊 Batch processing completed: ${created} created, ${updated} updated, ${errors.length} errors`);
+        
+      }, transactionOptions);
+
+      isTransactionActive = false;
+      
+      // Get results from session
+      const results = (session as any)._bulkResults || { created: 0, updated: 0, errors: [] };
+      const { created, updated, errors } = results;
+
+      console.log(`✅ Transaction completed successfully: ${created} created, ${updated} updated`);
+
+      // Return results
+      const totalProcessed = created + updated;
+      
+      if (errors.length > 0) {
+        return {
+          success: totalProcessed > 0,
+          message: `Processed ${totalProcessed} translations with ${errors.length} errors: ${created} created, ${updated} updated`,
+          created,
+          updated,
+          errors
+        };
+      }
+
+      return { 
+        success: true, 
+        message: `Successfully processed ${totalProcessed} translations: ${created} created, ${updated} updated`,
+        created,
+        updated
+      };
+
+    } catch (error) {
+      console.error('💥 Bulk upsert failed:', {
+        name: error.name,
+        message: error.message,
+        code: error.code,
+        transactionActive: isTransactionActive
+      });
+      
+      if (error instanceof AppError) {
+        throw error;
+      }
+      
+      // Create more specific error messages
+      if (error.message?.includes('transaction number')) {
+        throw AppError.database('Transaction conflict detected. Please retry the operation.');
+      }
+      
+      if (error.message?.includes('session')) {
+        throw AppError.database('Database session error. Please retry the operation.');
+      }
+      
+      throw AppError.database(`Bulk upsert failed: ${error.message}`);
+      
+    } finally {
+      // Always clean up session
+      if (session) {
+        try {
+          await session.endSession();
+          console.log('🧹 Session ended successfully');
+        } catch (endError) {
+          console.error('⚠️ Error ending session:', endError.message);
+        }
       }
     }
   }
-}
 }
 
 export default new ContentTranslationService();

@@ -55,7 +55,10 @@ export class WebSiteThemeService {
         throw new Error('Invalid website ID');
       }
 
-      return await WebSiteThemeModel.findOne({ websiteId, isActive: true }).populate('website');
+return await WebSiteThemeModel.findOne({ 
+  websiteId: new Types.ObjectId(websiteId), 
+  isActive: true 
+}).populate('website');
     } catch (error) {
       throw new Error(`Error fetching active theme: ${error.message}`);
     }
