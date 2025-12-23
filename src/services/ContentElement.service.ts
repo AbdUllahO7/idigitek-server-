@@ -310,14 +310,12 @@ class ContentElementService {
    * @returns Promise with the operation result
    */
   async deleteContentElement(id: string, hardDelete: boolean = false): Promise<{ success: boolean; message: string }> {
-    const session = await mongoose.startSession();
-
     try {
       if (!Types.ObjectId.isValid(id)) {
         throw AppError.validation('Invalid content element ID format');
       }
 
-      const contentElement = await ContentElementModel.findById(id).lean();
+      const contentElement = await ContentElementModel.findById(id);
       if (!contentElement) {
         throw AppError.notFound(`Content element with ID ${id} not found`);
       }
@@ -336,41 +334,30 @@ class ContentElementService {
         }
       }
 
-      // Start transaction after validations
-      session.startTransaction();
-
       if (hardDelete) {
-        // Delete translations and content element in transaction
-        await ContentTranslationModel.deleteMany({ contentElement: id }, { session });
-        await ContentElementModel.findByIdAndDelete(id, { session });
-        await session.commitTransaction();
+        // Delete translations first, then content element
+        await ContentTranslationModel.deleteMany({ contentElement: id });
+        await ContentElementModel.findByIdAndDelete(id);
         return { success: true, message: 'Content element and its translations deleted successfully' };
       } else {
-        // Soft delete in transaction
+        // Soft delete - deactivate content element and its translations
         await ContentElementModel.findByIdAndUpdate(
           id,
           { $set: { isActive: false } },
-          { session }
+          { new: true }
         );
         await ContentTranslationModel.updateMany(
           { contentElement: id },
-          { $set: { isActive: false } },
-          { session }
+          { $set: { isActive: false } }
         );
-        await session.commitTransaction();
         return { success: true, message: 'Content element and its translations deactivated successfully' };
       }
     } catch (error) {
-      if (session.inTransaction()) {
-        await session.abortTransaction();
-      }
       if (error instanceof AppError) throw error;
 
       // Log the actual error for debugging
       console.error('Delete content element error:', error);
       throw AppError.database('Failed to delete content element', error);
-    } finally {
-      session.endSession();
     }
   }
 
