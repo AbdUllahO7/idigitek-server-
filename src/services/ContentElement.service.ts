@@ -311,7 +311,6 @@ class ContentElementService {
    */
   async deleteContentElement(id: string, hardDelete: boolean = false): Promise<{ success: boolean; message: string }> {
     const session = await mongoose.startSession();
-    session.startTransaction();
 
     try {
       if (!Types.ObjectId.isValid(id)) {
@@ -337,25 +336,38 @@ class ContentElementService {
         }
       }
 
+      // Start transaction after validations
+      session.startTransaction();
+
       if (hardDelete) {
         // Delete translations and content element in transaction
-        await ContentTranslationModel.deleteMany({ contentElement: id }).session(session);
-        await ContentElementModel.findByIdAndDelete(id).session(session);
+        await ContentTranslationModel.deleteMany({ contentElement: id }, { session });
+        await ContentElementModel.findByIdAndDelete(id, { session });
         await session.commitTransaction();
         return { success: true, message: 'Content element and its translations deleted successfully' };
       } else {
         // Soft delete in transaction
-        await ContentElementModel.findByIdAndUpdate(id, { $set: { isActive: false } }).session(session);
+        await ContentElementModel.findByIdAndUpdate(
+          id,
+          { $set: { isActive: false } },
+          { session }
+        );
         await ContentTranslationModel.updateMany(
           { contentElement: id },
-          { $set: { isActive: false } }
-        ).session(session);
+          { $set: { isActive: false } },
+          { session }
+        );
         await session.commitTransaction();
         return { success: true, message: 'Content element and its translations deactivated successfully' };
       }
     } catch (error) {
-      await session.abortTransaction();
+      if (session.inTransaction()) {
+        await session.abortTransaction();
+      }
       if (error instanceof AppError) throw error;
+
+      // Log the actual error for debugging
+      console.error('Delete content element error:', error);
       throw AppError.database('Failed to delete content element', error);
     } finally {
       session.endSession();
