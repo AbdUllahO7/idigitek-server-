@@ -226,17 +226,17 @@ export class SectionController {
   /**
    * Delete section (unchanged)
    */
-  deleteSection = asyncHandler(async (req: Request, res: Response) => {
-    const { id } = req.params;
-    
-    if (!id) {
-      throw AppError.badRequest('Section ID is required');
-    }
-    
-    const result = await this.sectionService.deleteSection(id);
-    
-    return sendSuccess(res, result, 'Section deleted successfully');
-  });
+    deleteSection = asyncHandler(async (req: Request, res: Response) => {
+      const { id } = req.params;
+      
+      if (!id) {
+        throw AppError.badRequest('Section ID is required');
+      }
+      
+      const result = await this.sectionService.deleteSection(id);
+      
+      return sendSuccess(res, result, 'Section deleted successfully');
+    });
 
   /**
    * Get section with content by ID and language (unchanged)

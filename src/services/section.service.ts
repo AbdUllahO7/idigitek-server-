@@ -248,123 +248,102 @@ getSectionDescriptionByLanguage(section: any, language: 'en' | 'ar' | 'tr' = 'en
       }
     }
     // Delete section with complete cascade deletion
-      async deleteSection(id: string) {
-        try {
-          // ✅ PHASE 1: Collect all IDs WITHOUT session (to avoid circular JSON)
-          
-          // Get the section and its image
-          const section = await SectionModel.findById(id).select('image');
-          if (!section) {
-            throw new Error('Section not found');
-          }
-          const imageUrl = section.image;
-          
-          // Find all SectionItems belonging to this section
-          const sectionItems = await SectionItemModel.find({ section: id }).select('_id');
-          const sectionItemIds = sectionItems.map(item => item._id);
-          
-          // Find all SubSections belonging to this section
-          const subsections = await SubSectionModel.find({
-            $or: [
-              { section: id },
-              { sectionItem: { $in: sectionItemIds } }
-            ]
-          }).select('_id');
-          const subsectionIds = subsections.map(subsection => subsection._id);
-          
-          // Find all ContentElements
-          const contentElements = await ContentElementModel.find({
-            $or: [
-              { parent: id },
-              { parent: { $in: sectionItemIds } },
-              { parent: { $in: subsectionIds } },
-              { parentType: 'section', parentId: id },
-              { parentType: 'sectionItem', parentId: { $in: sectionItemIds } },
-              { parentType: 'subsection', parentId: { $in: subsectionIds } }
-            ]
-          }).select('_id');
-          const contentElementIds = contentElements.map(element => element._id);
-          
-          // ✅ PHASE 2: Delete everything in transaction WITH session
-          const session = await mongoose.startSession();
-          session.startTransaction();
-          
-          try {
-            // Verify section still exists before deleting
-            const sectionStillExists = await SectionModel.findById(id).select('_id').session(session);
-            if (!sectionStillExists) {
-              throw new Error('Section was deleted by another process');
-            }
-            
-            // Delete all ContentTranslations
-            const deletedTranslations = await ContentTranslationModel.deleteMany({
-              $or: [
-                { contentElement: { $in: contentElementIds } },
-                { elementId: { $in: contentElementIds } }
-              ]
-            }).session(session);
-            
-            // Delete all ContentElements
-            const deletedElements = await ContentElementModel.deleteMany({
-              _id: { $in: contentElementIds }
-            }).session(session);
-            
-            // Delete all SubSections
-            const deletedSubsections = await SubSectionModel.deleteMany({
-              _id: { $in: subsectionIds }
-            }).session(session);
-            
-            // Delete all SectionItems
-            const deletedSectionItems = await SectionItemModel.deleteMany({
-              _id: { $in: sectionItemIds }
-            }).session(session);
-            
-            // Finally, delete the section itself
-            const deletedSection = await SectionModel.findByIdAndDelete(id).session(session);
-            
-            // Commit the transaction
-            await session.commitTransaction();
-            
-            // ✅ PHASE 3: Clean up image after successful transaction
-            if (imageUrl) {
-              setTimeout(async () => {
-                try {
-                  const cloudinaryService = require('../services/cloudinary.service').default;
-                  const publicId = cloudinaryService.getPublicIdFromUrl(imageUrl);
-                  if (publicId) {
-                    cloudinaryService.deleteImage(publicId).catch((err: any) => {
-                      console.error('Failed to delete section image:', err);
-                    });
-                  }
-                } catch (error) {
-                  console.error('Error importing cloudinary service:', error);
-                }
-              }, 100);
-            }
-            
-            return { 
-              message: 'Section and all related data deleted successfully',
-              deletedCounts: {
-                sections: 1,
-                sectionItems: deletedSectionItems.deletedCount,
-                subsections: deletedSubsections.deletedCount,
-                contentElements: deletedElements.deletedCount,
-                contentTranslations: deletedTranslations.deletedCount
-              }
-            };
-            
-          } catch (error) {
-            await session.abortTransaction();
-            throw error;
-          } finally {
-            session.endSession();
-          }
-          
-        } catch (error) {
-          console.error(`❌ Error deleting section ${id}:`, error);
-          throw error;
-        }
+  // Delete section with complete cascade deletion
+  async deleteSection(id: string) {
+    try {
+      // ✅ Get the section and its image
+      const section = await SectionModel.findById(id).select('image');
+      if (!section) {
+        throw new Error('Section not found');
       }
+      const imageUrl = section.image;
+      
+      // ✅ Find all SectionItems belonging to this section
+      const sectionItems = await SectionItemModel.find({ section: id }).select('_id');
+      const sectionItemIds = sectionItems.map(item => item._id);
+      
+      // ✅ Find all SubSections
+      const subsections = await SubSectionModel.find({
+        $or: [
+          { section: id },
+          { sectionItem: { $in: sectionItemIds } }
+        ]
+      }).select('_id');
+      const subsectionIds = subsections.map(subsection => subsection._id);
+      
+      // ✅ Find all ContentElements
+      const contentElements = await ContentElementModel.find({
+        $or: [
+          { parent: id },
+          { parent: { $in: sectionItemIds } },
+          { parent: { $in: subsectionIds } },
+          { parentType: 'section', parentId: id },
+          { parentType: 'sectionItem', parentId: { $in: sectionItemIds } },
+          { parentType: 'subsection', parentId: { $in: subsectionIds } }
+        ]
+      }).select('_id');
+      const contentElementIds = contentElements.map(element => element._id);
+      
+      // ✅ Delete everything WITHOUT session
+      // Delete all ContentTranslations
+      const deletedTranslations = await ContentTranslationModel.deleteMany({
+        $or: [
+          { contentElement: { $in: contentElementIds } },
+          { elementId: { $in: contentElementIds } }
+        ]
+      });
+      
+      // Delete all ContentElements
+      const deletedElements = await ContentElementModel.deleteMany({
+        _id: { $in: contentElementIds }
+      });
+      
+      // Delete all SubSections
+      const deletedSubsections = await SubSectionModel.deleteMany({
+        _id: { $in: subsectionIds }
+      });
+      
+      // Delete all SectionItems
+      const deletedSectionItems = await SectionItemModel.deleteMany({
+        _id: { $in: sectionItemIds }
+      });
+      
+      // Finally, delete the section itself
+      const deletedSection = await SectionModel.findByIdAndDelete(id);
+      
+      // ✅ Clean up image
+      if (imageUrl) {
+        setTimeout(async () => {
+          try {
+            const cloudinaryService = require('../services/cloudinary.service').default;
+            const publicId = cloudinaryService.getPublicIdFromUrl(imageUrl);
+            if (publicId) {
+              cloudinaryService.deleteImage(publicId).catch((err: any) => {
+                console.error('Failed to delete section image:', err);
+              });
+            }
+          } catch (error) {
+            console.error('Error importing cloudinary service:', error);
+          }
+        }, 100);
+      }
+      
+      return { 
+        message: 'Section and all related data deleted successfully',
+        deletedCounts: {
+          sections: 1,
+          sectionItems: deletedSectionItems.deletedCount,
+          subsections: deletedSubsections.deletedCount,
+          contentElements: deletedElements.deletedCount,
+          contentTranslations: deletedTranslations.deletedCount
+        }
+      };
+      
+    } catch (error) {
+      console.error(`❌ Error deleting section ${id}:`, error);
+      throw error;
+    }
+  }
     // Helper method to verify deletion was complete
     async verifyDeletionComplete(sectionId: string) {
       try {
@@ -814,80 +793,71 @@ getSectionDescriptionByLanguage(section: any, language: 'en' | 'ar' | 'tr' = 'en
    * @param websiteId The ID of the website
    * @returns The updated section
    */
- async updateSectionOrder(sections: { sectionId: string; newOrder: number; websiteId: Schema.Types.ObjectId | string }[], maxRetries = 3) {
-    let attempt = 0;
-
-    while (attempt < maxRetries) {
-      const session = await mongoose.startSession();
-      try {
-        session.startTransaction();
-
-        if (!sections.length) {
-          throw new Error('At least one section is required');
-        }
-
-        const websiteId = sections[0].websiteId;
-        if (!websiteId) {
-          throw new Error('Website ID is required');
-        }
-
-        const sectionIds = sections.map(s => s.sectionId);
-        const existingSections = await SectionModel.find({ 
-          _id: { $in: sectionIds }, 
-          WebSiteId: websiteId 
-        }).session(session);
-
-        if (existingSections.length !== sections.length) {
-          throw new Error('One or more sections not found or do not belong to the specified website');
-        }
-
-        const allSections = await SectionModel.find({ WebSiteId: websiteId })
-          .sort({ order: 1 })
-          .session(session);
-
-        const maxOrder = allSections.length - 1;
-
-        for (const { newOrder } of sections) {
-          if (!Number.isInteger(newOrder) || newOrder < 0 || newOrder > maxOrder) {
-            throw new Error(`Order value must be between 0 and ${maxOrder}`);
-          }
-        }
-
-        const updates = sections.map(({ sectionId, newOrder }) => ({
-          updateOne: {
-            filter: { _id: sectionId, WebSiteId: websiteId },
-            update: { $set: { order: newOrder } },
-          },
-        }));
-
-        await SectionModel.bulkWrite(updates, { session });
-
-        const updatedSections = await SectionModel.find({ 
-          _id: { $in: sectionIds }, 
-          WebSiteId: websiteId 
-        }).session(session);
-
-        await session.commitTransaction();
-        return updatedSections;
-      } catch (error: any) {
-        await session.abortTransaction();
-        
-        if (error.name === 'MongoBulkWriteError' && error.message.includes('Write conflict')) {
-          attempt++;
-          if (attempt >= maxRetries) {
-            throw new Error('Max retries reached for write conflict. Please try again later.');
-          }
-          await new Promise(resolve => setTimeout(resolve, 100 * attempt));
-          continue;
-        }
-        
-        throw error;
-      } finally {
-        session.endSession();
+  /**
+   * Update the order of a section within a website
+   * @param sectionId The ID of the section to reorder
+   * @param newOrder The new order value for the section
+   * @param websiteId The ID of the website
+   * @returns The updated section
+   */
+  async updateSectionOrder(sections: { sectionId: string; newOrder: number; websiteId: Schema.Types.ObjectId | string }[]) {
+    try {
+      if (!sections.length) {
+        throw new Error('At least one section is required');
       }
-    }
 
-    throw new Error('Unexpected error: Retry loop exited without resolution');
+      const websiteId = sections[0].websiteId;
+      if (!websiteId) {
+        throw new Error('Website ID is required');
+      }
+
+      const sectionIds = sections.map(s => s.sectionId);
+      
+      // ✅ Check if sections exist WITHOUT session
+      const existingSections = await SectionModel.find({ 
+        _id: { $in: sectionIds }, 
+        WebSiteId: websiteId 
+      });
+
+      if (existingSections.length !== sections.length) {
+        throw new Error('One or more sections not found or do not belong to the specified website');
+      }
+
+      // ✅ Get all sections for validation WITHOUT session
+      const allSections = await SectionModel.find({ WebSiteId: websiteId })
+        .sort({ order: 1 });
+
+      const maxOrder = allSections.length - 1;
+
+      // Validate order values
+      for (const { newOrder } of sections) {
+        if (!Number.isInteger(newOrder) || newOrder < 0 || newOrder > maxOrder) {
+          throw new Error(`Order value must be between 0 and ${maxOrder}`);
+        }
+      }
+
+      // ✅ Update WITHOUT session
+      const updates = sections.map(({ sectionId, newOrder }) => ({
+        updateOne: {
+          filter: { _id: sectionId, WebSiteId: websiteId },
+          update: { $set: { order: newOrder } },
+        },
+      }));
+
+      await SectionModel.bulkWrite(updates);
+
+      // ✅ Return updated sections WITHOUT session
+      const updatedSections = await SectionModel.find({ 
+        _id: { $in: sectionIds }, 
+        WebSiteId: websiteId 
+      });
+
+      return updatedSections;
+      
+    } catch (error: any) {
+      console.error('Error updating section order:', error);
+      throw error;
+    }
   }
   /**
  * Get basic section information (id, name, subName) for lightweight operations

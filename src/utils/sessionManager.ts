@@ -1,15 +1,39 @@
-// src/utils/sessionManager.ts - نسخة مبسطة
+// src/utils/sessionManager.ts - نسخة تشتغل على standalone و replica set
 import mongoose from 'mongoose';
 import logger from '../config/logger';
 
 export class SessionManager {
   /**
-   * Execute a function with session and automatic cleanup
+   * Check if MongoDB is running as a replica set
+   */
+  private static async isReplicaSet(): Promise<boolean> {
+    try {
+      const adminDb = mongoose.connection.db?.admin();
+      if (!adminDb) return false;
+      
+      const status = await adminDb.replSetGetStatus();
+      return !!status;
+    } catch (error: any) {
+      // If we get an error checking replica set status, we're on standalone
+      return false;
+    }
+  }
+
+  /**
+   * Execute a function with optional session (only if replica set)
    */
   static async withSession<T>(
-    fn: (session: mongoose.ClientSession) => Promise<T>,
+    fn: (session: mongoose.ClientSession | null) => Promise<T>,
     options?: { useTransaction?: boolean }
   ): Promise<T> {
+    const isReplica = await this.isReplicaSet();
+    
+    // If not a replica set, run without session
+    if (!isReplica) {
+      logger.debug('Running without session (standalone MongoDB)');
+      return await fn(null);
+    }
+    
     const session = await mongoose.startSession();
     
     try {
@@ -24,7 +48,7 @@ export class SessionManager {
       }
       
       return result;
-    } catch (error) {
+    } catch (error: any) {
       if (options?.useTransaction && session.inTransaction()) {
         await session.abortTransaction();
       }
@@ -41,12 +65,20 @@ export class SessionManager {
   }
   
   /**
-   * Execute a transaction with automatic retry
+   * Execute a transaction (only if replica set)
    */
   static async withTransaction<T>(
-    fn: (session: mongoose.ClientSession) => Promise<T>,
+    fn: (session: mongoose.ClientSession | null) => Promise<T>,
     maxRetries: number = 3
   ): Promise<T> {
+    const isReplica = await this.isReplicaSet();
+    
+    // If not a replica set, run without transaction
+    if (!isReplica) {
+      logger.debug('Running without transaction (standalone MongoDB)');
+      return await fn(null);
+    }
+    
     let lastError: any;
     
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -67,14 +99,12 @@ export class SessionManager {
         
         lastError = error;
         
-        // Check if it's a retryable error
         if (this.isRetryableError(error) && attempt < maxRetries) {
           logger.warn(`Transaction failed (attempt ${attempt}/${maxRetries}), retrying...`, {
             error: error.message,
             attempt
           });
           
-          // Wait before retry
           await this.delay(Math.pow(2, attempt) * 100);
           await session.endSession();
           continue;
@@ -93,9 +123,6 @@ export class SessionManager {
     throw lastError;
   }
   
-  /**
-   * Check if error is retryable
-   */
   private static isRetryableError(error: any): boolean {
     const retryableErrors = [
       'WriteConflict',
@@ -111,14 +138,10 @@ export class SessionManager {
     );
   }
   
-  /**
-   * Delay utility for retries
-   */
   private static delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 }
 
-// Export utility functions
 export const withDatabaseTransaction = SessionManager.withTransaction;
 export const withDatabaseSession = SessionManager.withSession;
